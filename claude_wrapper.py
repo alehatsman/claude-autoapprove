@@ -45,7 +45,7 @@ __version__ = "1.1.0"
 
 # Constants
 DEFAULT_CONFIG_PATH = Path.home() / ".claude_wrapper.conf"
-DEFAULT_LOG_PATH = Path.home() / ".claude_wrapper.log"
+DEFAULT_LOG_DIR = Path.home() / ".claude_wrapper_logs"
 DEFAULT_AUTO_APPROVE_DELAY = 1
 MAX_BUFFER_SIZE = 10000
 READ_SIZE = 1024
@@ -78,7 +78,8 @@ class Config:
     DEFAULT_CONFIG = {
         "auto_approve_delay": DEFAULT_AUTO_APPROVE_DELAY,
         "debug": False,
-        "log_file": str(DEFAULT_LOG_PATH),
+        "log_dir": str(DEFAULT_LOG_DIR),  # Directory for log files (one per instance)
+        "log_retention_days": 7,  # Auto-delete log files older than this many days
         "claude_path": "claude",
         "auto_approve_enabled": True,
         "show_status_bar": True,  # Show status bar with countdown and counter
@@ -156,6 +157,12 @@ class ClaudeWrapper:
         self.claude_path = config.get("claude_path", "claude")
         self.auto_approve_enabled = config.get("auto_approve_enabled", True)
 
+        # Generate unique log file for this instance using PID
+        import os as os_module
+        self.pid = os_module.getpid()
+        log_dir = Path(config.get("log_dir", str(DEFAULT_LOG_DIR)))
+        self.log_file = log_dir / f"wrapper_{self.pid}.log"
+
         # State
         self.master_fd: Optional[int] = None
         self.process: Optional[Popen] = None
@@ -186,26 +193,57 @@ class ClaudeWrapper:
     def _setup_logging(self):
         """Configure logging"""
         if self.debug:
-            log_file = self.config.get("log_file", str(DEFAULT_LOG_PATH))
+            # Ensure log directory exists
+            self.log_file.parent.mkdir(parents=True, exist_ok=True)
+
+            # Clean up old log files (older than 7 days)
+            self._cleanup_old_logs()
+
             logging.basicConfig(
                 level=logging.DEBUG,
-                format='%(asctime)s - %(levelname)s - %(message)s',
+                format='%(asctime)s - PID:%(process)d - %(levelname)s - %(message)s',
                 handlers=[
-                    logging.FileHandler(log_file),
+                    logging.FileHandler(self.log_file),
                     logging.StreamHandler(sys.stderr)
                 ]
             )
-            logging.info("Debug mode enabled")
+            logging.info(f"Debug mode enabled - Log file: {self.log_file}")
+            logging.info(f"Process ID: {self.pid}")
         else:
             logging.basicConfig(level=logging.ERROR)
 
+    def _cleanup_old_logs(self):
+        """Remove log files older than 7 days"""
+        try:
+            log_dir = self.log_file.parent
+            if not log_dir.exists():
+                return
+
+            import time
+            current_time = time.time()
+            max_age_days = self.config.get("log_retention_days", 7)
+            max_age_seconds = max_age_days * 86400  # days to seconds
+
+            for log_file in log_dir.glob("wrapper_*.log"):
+                try:
+                    file_age = current_time - log_file.stat().st_mtime
+                    if file_age > max_age_seconds:
+                        log_file.unlink()
+                        if self.debug:
+                            logging.debug(f"Removed old log file: {log_file}")
+                except Exception as e:
+                    # Ignore errors for individual files
+                    pass
+        except Exception as e:
+            # Don't fail if cleanup fails
+            pass
+
     def _debug_log(self, message: str):
-        """Write debug message to configured log file"""
+        """Write debug message to this instance's log file"""
         if self.debug:
-            log_file = self.config.get("log_file", str(DEFAULT_LOG_PATH))
             try:
-                with open(log_file, 'a') as f:
-                    f.write(message)
+                with open(self.log_file, 'a') as f:
+                    f.write(f"[PID {self.pid}] {message}")
             except Exception as e:
                 logging.error(f"Failed to write debug log: {e}")
 
@@ -391,11 +429,11 @@ class ClaudeWrapper:
         """Show idle state in status bar (don't actually clear to avoid jumps)"""
         if self.auto_approve_enabled:
             if self._auto_approve_count > 0:
-                self.draw_status_bar(f"Ready (auto-approve ON, {self._auto_approve_count} executed) [Ctrl+A to toggle]", "2")
+                self.draw_status_bar(f"[PID {self.pid}] Ready (auto-approve ON, {self._auto_approve_count} executed) [Ctrl+A to toggle]", "2")
             else:
-                self.draw_status_bar("Ready (auto-approve ON) [Ctrl+A to toggle]", "2")
+                self.draw_status_bar(f"[PID {self.pid}] Ready (auto-approve ON) [Ctrl+A to toggle]", "2")
         else:
-            self.draw_status_bar("Ready (auto-approve OFF) [Ctrl+A to toggle]", "90")
+            self.draw_status_bar(f"[PID {self.pid}] Ready (auto-approve OFF) [Ctrl+A to toggle]", "90")
 
     def countdown_and_approve(self, seconds):
         """Show countdown and auto-approve, cancellable by user input"""
@@ -1076,7 +1114,7 @@ def main():
     parser.add_argument(
         '--debug',
         action='store_true',
-        help=f'Enable debug logging (default log: {DEFAULT_LOG_PATH})'
+        help=f'Enable debug logging (logs saved to: {DEFAULT_LOG_DIR}/wrapper_<PID>.log)'
     )
 
     parser.add_argument(
