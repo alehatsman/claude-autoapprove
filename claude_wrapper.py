@@ -85,7 +85,8 @@ class Config:
         "restart_key": "\x01",  # Ctrl+A
         "cooldown_seconds": 1.0,  # Cooldown for same prompt (different prompts approved immediately)
         "min_detection_score": 3,  # Minimum score required to detect permission prompt (higher = stricter)
-        "max_approvals_per_minute": 120,  # Maximum approvals allowed per minute (safety limit)
+        "max_approvals_per_minute": 500,  # Maximum total approvals per minute (very high for batch operations)
+        "max_same_prompt_approvals": 5,  # Maximum times to approve the SAME prompt in 60s (loop detection)
         "idle_detection_enabled": True,  # Enable idle detection fallback
         "idle_timeout_seconds": 5.0,  # Seconds of no output before triggering idle action
         "patterns": {
@@ -499,15 +500,46 @@ class ClaudeWrapper:
             # Remove old timestamps (older than 60 seconds)
             self._approval_timestamps = [t for t in self._approval_timestamps if current_time - t < 60]
 
-            # If more than X approvals in the last 60 seconds, something is wrong
-            max_approvals_per_minute = self.config.get("max_approvals_per_minute", 120)  # Increased default
+            # Calculate hash to identify this specific prompt
+            prompt_hash = hashlib.md5(self.strip_ansi(buffer).encode()).hexdigest()
+
+            # Smart rate limiting: only block if we're seeing the SAME prompt repeatedly
+            # Count how many times we've approved THIS SPECIFIC prompt in the last 60 seconds
+            if not hasattr(self, '_approval_hashes'):
+                self._approval_hashes = []
+
+            # Remove old hash entries (older than 60 seconds)
+            self._approval_hashes = [(h, t) for h, t in self._approval_hashes if current_time - t < 60]
+
+            # Count approvals of THIS specific prompt
+            same_prompt_count = sum(1 for h, t in self._approval_hashes if h == prompt_hash)
+
+            # If we've approved the same prompt more than X times in 60 seconds, it's a loop
+            max_same_prompt_approvals = self.config.get("max_same_prompt_approvals", 5)
+            if same_prompt_count >= max_same_prompt_approvals:
+                if self.debug:
+                    self._debug_log(
+                        f"\n=== SAME PROMPT LOOP DETECTED ===\n"
+                        f"Same prompt approved {same_prompt_count} times in 60s\n"
+                        f"Max allowed: {max_same_prompt_approvals}\n"
+                        f"This is likely a bug - blocking further approvals\n"
+                    )
+                # Show warning to user
+                self.draw_status_bar(
+                    f"⚠  Same prompt loop detected ({same_prompt_count}x) - blocked",
+                    "31"
+                )
+                time.sleep(2)
+                return False
+
+            # Global rate limit as final safety (very high limit for different prompts)
+            max_approvals_per_minute = self.config.get("max_approvals_per_minute", 500)
             if len(self._approval_timestamps) >= max_approvals_per_minute:
                 if self.debug:
                     self._debug_log(
-                        f"\n=== RATE LIMIT EXCEEDED ===\n"
-                        f"Approvals in last 60s: {len(self._approval_timestamps)}\n"
+                        f"\n=== GLOBAL RATE LIMIT EXCEEDED ===\n"
+                        f"Total approvals in last 60s: {len(self._approval_timestamps)}\n"
                         f"Max allowed: {max_approvals_per_minute}\n"
-                        f"Possible false positive loop detected!\n"
                     )
                 # Show warning to user
                 self.draw_status_bar(
@@ -517,8 +549,7 @@ class ClaudeWrapper:
                 time.sleep(2)
                 return False
 
-            # Calculate hash to identify this specific prompt
-            prompt_hash = hashlib.md5(self.strip_ansi(buffer).encode()).hexdigest()
+            # Check if it's the same as the last approved prompt
             is_same_prompt = (prompt_hash == self._approved_prompt_hash and self._approved_prompt_hash is not None)
 
             # Only apply cooldown if it's the SAME prompt (prevent duplicate approvals)
@@ -577,6 +608,11 @@ class ClaudeWrapper:
                     self._countdown_running = True
                     self._countdown_cancelled.clear()  # Reset cancellation flag
                     self._countdown_approve_now.clear()  # Reset immediate approval flag
+
+                    # Track this prompt hash for loop detection (only when actually approving)
+                    if not hasattr(self, '_approval_hashes'):
+                        self._approval_hashes = []
+                    self._approval_hashes.append((prompt_hash, current_time))
 
                     def countdown_wrapper():
                         try:
