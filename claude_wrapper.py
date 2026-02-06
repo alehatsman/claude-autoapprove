@@ -85,7 +85,9 @@ class Config:
         "restart_key": "\x01",  # Ctrl+A
         "cooldown_seconds": 1.0,  # Cooldown for same prompt (different prompts approved immediately)
         "min_detection_score": 3,  # Minimum score required to detect permission prompt (higher = stricter)
-        "max_approvals_per_minute": 10,  # Maximum approvals allowed per minute (safety limit)
+        "max_approvals_per_minute": 120,  # Maximum approvals allowed per minute (safety limit)
+        "idle_detection_enabled": True,  # Enable idle detection fallback
+        "idle_timeout_seconds": 5.0,  # Seconds of no output before triggering idle action
         "patterns": {
             "permission_indicators": [
                 # Don't include indicators that are already checked explicitly in code
@@ -168,6 +170,8 @@ class ClaudeWrapper:
         self._last_approval_time = 0  # Track when we last approved to prevent rapid re-triggers
         self._approved_prompt_hash = None  # Hash of the last approved prompt to avoid duplicates
         self._approval_timestamps = []  # Track recent approval times for rate limiting
+        self._last_output_time = time.time()  # Track when we last received output
+        self._last_idle_action_time = 0  # Track when we last performed an idle action
 
         # Terminal layout
         self.term_height = 24  # Default, will be updated
@@ -234,6 +238,11 @@ class ClaudeWrapper:
             score += 2
         if 'Would you like to proceed?' in clean_text:
             score += 2
+        # File creation/modification prompts
+        if re.search(r'Do you want to (create|edit|delete|modify|write)', clean_text, re.IGNORECASE):
+            score += 2
+        if re.search(r'Would you like to (create|edit|delete|modify|write)', clean_text, re.IGNORECASE):
+            score += 2
 
         # Medium indicators (worth 1 point each)
         if 'Esc to cancel' in clean_text:
@@ -244,10 +253,12 @@ class ClaudeWrapper:
             score += 1
 
         # Action buttons - must have both Yes AND No (not just one)
+        # This is a strong indicator of permission prompts (worth 3 points - enough on its own)
         has_yes = '1. Yes' in clean_text or '1) Yes' in clean_text
-        has_no = '2. No' in clean_text or '2) No' in clean_text
+        # No can be option 2 or 3 (depending on prompt type)
+        has_no = re.search(r'[23]\.\s*No', clean_text) or re.search(r'[23]\)\s*No', clean_text)
         if has_yes and has_no:
-            score += 1
+            score += 3
 
         # y/n prompt format
         if re.search(r'\(y/n\)\s*$', clean_text, re.MULTILINE):
@@ -287,7 +298,19 @@ class ClaudeWrapper:
                 f"Score: {score}/{min_score} required\n"
                 f"Length: {len(clean_text)}\n"
                 f"Sentences: {sentence_count}\n"
+                f"Has 'Permission rule': {'Permission rule' in clean_text}\n"
+                f"Has 'Do you want to proceed': {'Do you want to proceed' in clean_text}\n"
+                f"Has 'Yes/No options': {has_yes and has_no}\n"
                 f"Last 200 chars: {repr(clean_text[-200:])}\n"
+            )
+
+        # If score is close but not quite enough, log a warning
+        if self.debug and score == min_score - 1:
+            self._debug_log(
+                f"\n=== WARNING: Score just below threshold ===\n"
+                f"Score: {score}, need {min_score}\n"
+                f"This might be a missed permission prompt!\n"
+                f"Full text: {repr(clean_text)}\n"
             )
 
         return score >= min_score
@@ -843,6 +866,9 @@ class ClaudeWrapper:
                             logging.debug("EOF on master_fd")
                             break
 
+                        # Update last output time
+                        self._last_output_time = time.time()
+
                         # Write to stdout
                         os.write(sys.stdout.fileno(), data)
 
@@ -875,6 +901,84 @@ class ClaudeWrapper:
                     except OSError as e:
                         logging.error(f"Error reading from master_fd: {e}")
                         break
+
+                # Check for idle state (no output for a while)
+                if (self.config.get("idle_detection_enabled", True) and
+                    self.auto_approve_enabled and
+                    not self._countdown_running):
+
+                    current_time = time.time()
+                    idle_timeout = self.config.get("idle_timeout_seconds", 5.0)
+                    time_since_output = current_time - self._last_output_time
+                    time_since_idle_action = current_time - self._last_idle_action_time
+
+                    # Debug log idle state periodically (every 2 seconds of idle time)
+                    if self.debug and time_since_output >= 2.0 and int(time_since_output) % 2 == 0:
+                        if not hasattr(self, '_last_idle_log_time') or current_time - self._last_idle_log_time >= 2.0:
+                            self._debug_log(
+                                f"\n=== Idle state check ===\n"
+                                f"Time since output: {time_since_output:.2f}s\n"
+                                f"Time since idle action: {time_since_idle_action:.2f}s\n"
+                                f"Buffer length: {len(output_buffer)}\n"
+                                f"Timeout threshold: {idle_timeout}s\n"
+                            )
+                            self._last_idle_log_time = current_time
+
+                    # If idle for long enough and not recently acted
+                    if time_since_output >= idle_timeout and time_since_idle_action >= idle_timeout:
+                        # Check if the current buffer looks like a prompt we should handle
+                        # Use a lower threshold for idle detection to catch edge cases
+                        if len(output_buffer) > 50:  # Only act if there's meaningful output
+                            if self.debug:
+                                self._debug_log(
+                                    f"\n=== Idle detection triggered ===\n"
+                                    f"Time since output: {time_since_output:.2f}s\n"
+                                    f"Buffer length: {len(output_buffer)}\n"
+                                    f"Attempting approval\n"
+                                )
+
+                            self.draw_status_bar("⏱  Idle detected, auto-approving...", "33")
+                            time.sleep(0.3)
+
+                            # Use the same approval logic as countdown_and_approve
+                            # Determine what to send based on prompt type in buffer
+                            prompt_type = self.get_prompt_type(output_buffer)
+
+                            if self.debug:
+                                self._debug_log(
+                                    f"Prompt type detected: {prompt_type}\n"
+                                )
+
+                            time.sleep(0.1)  # Small delay to ensure prompt is ready
+
+                            if prompt_type == 'numbered_menu':
+                                # For numbered menu, just press Enter (cursor should be on "Yes" by default)
+                                bytes_written = os.write(self.master_fd, b'\r')
+                                if self.debug:
+                                    self._debug_log(f"Wrote {bytes_written} bytes (Enter key for numbered menu)\n")
+                            else:
+                                # Send 'yes' for text input prompts
+                                bytes_written = os.write(self.master_fd, b'yes')
+                                if self.debug:
+                                    self._debug_log(f"Wrote {bytes_written} bytes (text 'yes')\n")
+                                time.sleep(0.1)
+                                # Send Enter
+                                bytes_written = os.write(self.master_fd, b'\r')
+                                if self.debug:
+                                    self._debug_log(f"Wrote {bytes_written} bytes (Enter key after 'yes')\n")
+
+                            # Update counters
+                            self._last_idle_action_time = current_time
+                            self._auto_approve_count += 1
+                            self._last_approval_time = current_time
+                            self._approval_timestamps.append(current_time)
+
+                            self.draw_status_bar(f"✓ Auto-approved via idle detection (#{self._auto_approve_count})", "32")
+                            time.sleep(0.3)
+                            self.clear_status_bar()
+
+                            # Clear buffer after handling
+                            output_buffer = ""
 
             # Wait for process to finish
             if self.process:
