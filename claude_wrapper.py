@@ -595,17 +595,17 @@ class ClaudeWrapper:
             self._approved_prompt_hash = prompt_hash
 
             if self.debug:
+                time_since_last = current_time - self._last_approval_time
                 self._debug_log(
-                    f"\n=== New prompt detected ===\n"
-                    f"Different from last prompt\n"
+                    f"\n=== Prompt detected ===\n"
                     f"Time since last approval: {time_since_last:.2f}s\n"
                     f"Proceeding with auto-approve\n"
                 )
 
             # Use lock to prevent race condition when multiple prompts appear quickly
             with self._countdown_lock:
-                # If a countdown is running for a different prompt, cancel it and start new one
-                if self._countdown_running and not is_same_prompt:
+                # If a countdown is running, cancel it and start new one
+                if self._countdown_running:
                     if self.debug:
                         self._debug_log("\n=== Cancelling old countdown for new prompt ===\n")
                     self._countdown_cancelled.set()
