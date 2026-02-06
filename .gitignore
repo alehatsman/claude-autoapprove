@@ -1,0 +1,39 @@
+# Build artifacts
+autoapprove
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Go build cache
+*.test
+*.out
+go.work
+
+# Python artifacts (old implementation)
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Logs
+*.log
+session.log
+test.log
+autoapprove.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test outputs
+scratchpad/
+tmp/

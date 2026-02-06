@@ -1,0 +1,65 @@
+# Auto-Approve Configuration
+#
+# This file defines how the wrapper detects and responds to prompts
+
+# Global timeouts and intervals
+idle_timeout: 15s          # Time with no output before triggering nudge
+min_send_interval: 500ms   # Minimum time between sending inputs
+nudge_initial_delay: 2s    # Delay before first nudge action
+nudge_max_retries: 3       # Max nudge attempts before manual mode
+
+# Prompt detection rules
+prompt_rules:
+  # Continue/Proceed prompts
+  - match_regex: '(?i)(continue|proceed)\s*\?'
+    send: "y\n"
+    description: "Continue/Proceed prompt"
+    cooldown: 2s
+
+  # Yes/No prompts
+  - match_regex: '(?i)\[y/n\]'
+    send: "y\n"
+    description: "Yes/No prompt"
+    cooldown: 2s
+
+  # Press Enter prompts
+  - match_regex: '(?i)press\s+(enter|return)'
+    send: "\n"
+    description: "Press Enter prompt"
+    cooldown: 1s
+
+  # Approval requests
+  - match_regex: '(?i)approve\s+this'
+    send: "y\n"
+    description: "Approval request"
+    cooldown: 2s
+
+  # "Do you want to..." questions
+  - match_regex: '(?i)do\s+you\s+want\s+to'
+    send: "yes\n"
+    description: "Want to question"
+    cooldown: 2s
+
+  # "Allow" prompts
+  - match_regex: '(?i)allow\s+\w+'
+    send: "y\n"
+    description: "Allow permission"
+    cooldown: 2s
+
+  # Confirmation prompts
+  - match_regex: '(?i)confirm'
+    send: "y\n"
+    description: "Confirmation prompt"
+    cooldown: 2s
+
+  # Type 'yes' to continue
+  - match_regex: '(?i)type\s+.?yes.?\s+to'
+    send: "yes\n"
+    description: "Type yes prompt"
+    cooldown: 2s
+
+# Notes:
+# - Cooldown prevents sending the same response too frequently
+# - Regexes are case-insensitive ((?i) flag)
+# - The wrapper will automatically switch to manual mode if dangerous
+#   commands are detected (rm -rf /, dd, mkfs, etc.)
