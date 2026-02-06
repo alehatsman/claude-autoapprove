@@ -84,12 +84,11 @@ class Config:
         "auto_approve_enabled": True,
         "show_status_bar": True,  # Show status bar with countdown and counter
         "toggle_key": "\x01",  # Ctrl+A (toggle auto-approve on/off)
-        "cooldown_seconds": 1.0,  # Cooldown for same prompt (different prompts approved immediately)
         "min_detection_score": 3,  # Minimum score required to detect permission prompt (higher = stricter)
         "max_approvals_per_minute": 500,  # Maximum total approvals per minute (very high for batch operations)
         "max_same_prompt_approvals": 5,  # Maximum times to approve the SAME prompt in 60s (loop detection)
         "idle_detection_enabled": True,  # Enable idle detection fallback
-        "idle_timeout_seconds": 5.0,  # Seconds of no output before triggering idle action
+        "idle_timeout_seconds": 2.5,  # Seconds of no output before triggering idle action (catches stuck prompts)
         "patterns": {
             "permission_indicators": [
                 # Don't include indicators that are already checked explicitly in code
@@ -508,6 +507,9 @@ class ClaudeWrapper:
             if self.debug:
                 self._debug_log(f"Wrote {bytes_written} bytes (Enter key after 'yes')\n")
 
+        # Clear the prompt hash immediately so new prompts can be detected
+        self._approved_prompt_hash = None
+
         # Return to ready state after sending approval
         self.clear_status_bar()
 
@@ -534,8 +536,6 @@ class ClaudeWrapper:
         # Check if it's a permission prompt
         if self.is_permission_prompt(buffer):
             current_time = time.time()
-            cooldown_seconds = self.config.get("cooldown_seconds", 1.0)
-            time_since_last = current_time - self._last_approval_time
 
             # Rate limiting: check if we're approving too many prompts too quickly
             # Remove old timestamps (older than 60 seconds)
@@ -590,44 +590,11 @@ class ClaudeWrapper:
                 time.sleep(2)
                 return False
 
-            # Check if it's the same as the last approved prompt
-            is_same_prompt = (prompt_hash == self._approved_prompt_hash and self._approved_prompt_hash is not None)
-
-            # Only apply cooldown if it's the SAME prompt (prevent duplicate approvals)
-            # Different prompts can be approved immediately even within cooldown period
-            if is_same_prompt and time_since_last < cooldown_seconds:
-                if self.debug:
-                    self._debug_log(
-                        f"\n=== Duplicate prompt blocked ===\n"
-                        f"Same prompt within cooldown: {time_since_last:.2f}s\n"
-                        f"Skipping auto-approve\n"
-                    )
-                # Show user why it was skipped
-                self.draw_status_bar(f"Duplicate prompt (blocked)", "90")
-                return False
-
-            # Additional check: if it's the same prompt and within extended window, still block
-            # This handles cases where buffer contains old prompt text
-            hash_expiry = cooldown_seconds * 3
-            if is_same_prompt and time_since_last < hash_expiry:
-                if self.debug:
-                    self._debug_log(
-                        f"\n=== Duplicate prompt (extended window) ===\n"
-                        f"Prompt hash: {prompt_hash}\n"
-                        f"Time since last: {time_since_last:.2f}s\n"
-                        f"Skipping auto-approve\n"
-                    )
-                # Show user why it was skipped
-                self.draw_status_bar(f"Same prompt as before (blocked)", "90")
-                time.sleep(1)
-                self.clear_status_bar()
-                return False
-
-            # This is either a new prompt or enough time has passed
             # Store this prompt hash for duplicate detection
+            # (We clear it immediately after approval, so rapid prompts work fine)
             self._approved_prompt_hash = prompt_hash
 
-            if self.debug and not is_same_prompt:
+            if self.debug:
                 self._debug_log(
                     f"\n=== New prompt detected ===\n"
                     f"Different from last prompt\n"
