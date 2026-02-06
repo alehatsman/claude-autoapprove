@@ -82,7 +82,7 @@ class Config:
         "claude_path": "claude",
         "auto_approve_enabled": True,
         "show_status_bar": True,  # Show status bar with countdown and counter
-        "restart_key": "\x01",  # Ctrl+A
+        "toggle_key": "\x01",  # Ctrl+A (toggle auto-approve on/off)
         "cooldown_seconds": 1.0,  # Cooldown for same prompt (different prompts approved immediately)
         "min_detection_score": 3,  # Minimum score required to detect permission prompt (higher = stricter)
         "max_approvals_per_minute": 500,  # Maximum total approvals per minute (very high for batch operations)
@@ -389,10 +389,13 @@ class ClaudeWrapper:
 
     def clear_status_bar(self):
         """Show idle state in status bar (don't actually clear to avoid jumps)"""
-        if self._auto_approve_count > 0:
-            self.draw_status_bar(f"Ready (auto-approve enabled, {self._auto_approve_count} executed)", "2")
+        if self.auto_approve_enabled:
+            if self._auto_approve_count > 0:
+                self.draw_status_bar(f"Ready (auto-approve ON, {self._auto_approve_count} executed) [Ctrl+A to toggle]", "2")
+            else:
+                self.draw_status_bar("Ready (auto-approve ON) [Ctrl+A to toggle]", "2")
         else:
-            self.draw_status_bar("Ready (auto-approve enabled)", "2")
+            self.draw_status_bar("Ready (auto-approve OFF) [Ctrl+A to toggle]", "90")
 
     def countdown_and_approve(self, seconds):
         """Show countdown and auto-approve, cancellable by user input"""
@@ -412,7 +415,7 @@ class ClaudeWrapper:
 
             # Draw countdown message
             self.draw_status_bar(
-                f"⏱  Auto-approving in {i} seconds... (Enter=approve now, any key=cancel, Ctrl+A=restart)",
+                f"⏱  Auto-approving in {i}s... (Enter=approve now, any key=cancel, Ctrl+A=toggle off)",
                 "33"
             )
             time.sleep(1)
@@ -861,28 +864,31 @@ class ClaudeWrapper:
                             continue  # Don't forward Enter to Claude, wait for countdown thread to approve
 
                         # Check for special commands
-                        restart_key = self.config.get("restart_key", "\x01").encode()
-                        if char == restart_key and not self._countdown_running and self.auto_approve_enabled:
-                            # Show restart message in status bar
-                            self.draw_status_bar("↻ Restarting auto-approve countdown...", "36")
-                            time.sleep(0.3)
-                            # Restart countdown
-                            with self._countdown_lock:
-                                self._countdown_running = True
-                                self._countdown_cancelled.clear()
-                                self._countdown_approve_now.clear()
+                        toggle_key = self.config.get("toggle_key", "\x01").encode()
+                        if char == toggle_key:
+                            # Toggle auto-approve on/off
+                            self.auto_approve_enabled = not self.auto_approve_enabled
 
-                                def countdown_wrapper():
-                                    try:
-                                        self.countdown_and_approve(self.auto_approve_delay)
-                                    finally:
-                                        with self._countdown_lock:
-                                            self._countdown_running = False
+                            # Cancel any running countdown
+                            if self._countdown_running:
+                                self.cancel_countdown()
 
-                                self._countdown_thread = threading.Thread(target=countdown_wrapper)
-                                self._countdown_thread.daemon = True
-                                self._countdown_thread.start()
-                            continue  # Don't forward restart key to Claude
+                            # Show toggle message
+                            if self.auto_approve_enabled:
+                                self.draw_status_bar("✓ Auto-approve ENABLED", "32")
+                            else:
+                                self.draw_status_bar("✗ Auto-approve DISABLED", "31")
+
+                            time.sleep(0.8)  # Show message longer
+                            self.clear_status_bar()
+
+                            if self.debug:
+                                self._debug_log(
+                                    f"\n=== Auto-approve toggled ===\n"
+                                    f"New state: {'ENABLED' if self.auto_approve_enabled else 'DISABLED'}\n"
+                                )
+
+                            continue  # Don't forward toggle key to Claude
 
                         # Cancel countdown if user presses any other key
                         if self._countdown_running:
