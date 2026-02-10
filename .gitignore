@@ -1,27 +1,14 @@
-# Build artifacts
-autoapprove
-*.exe
-*.dll
-*.so
-*.dylib
-
-# Go build cache
-*.test
-*.out
-go.work
-
-# Python artifacts (old implementation)
+# Python artifacts
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
 
-# Logs
-*.log
-session.log
-test.log
-autoapprove.log
+# Virtual environment
+venv/
+env/
+ENV/
 
 # IDE
 .vscode/
@@ -34,6 +21,15 @@ autoapprove.log
 .DS_Store
 Thumbs.db
 
+# Logs
+*.log
+session.log
+test.log
+
 # Test outputs
 scratchpad/
 tmp/
+
+# Config files (optional)
+.claude_wrapper.conf
+.claude_wrapper_logs/
