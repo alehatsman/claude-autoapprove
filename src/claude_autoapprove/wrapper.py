@@ -217,20 +217,21 @@ class ClaudeWrapper:
                 except:
                     pass
 
-    def _handle_user_input(self, char: bytes) -> bool:
+    def _handle_user_input(self, char: bytes, output_buffer: str) -> tuple[bool, str]:
         """
         Handle input from user.
 
         Args:
             char: Input character(s)
+            output_buffer: Current output buffer
 
         Returns:
-            True to continue, False to exit
+            Tuple of (continue: bool, updated_buffer: str)
         """
         # Check if Enter pressed during countdown - approve immediately
         if self.approval_manager.is_running() and char in (b"\r", b"\n"):
             self.approval_manager.approve_now()
-            return True  # Don't forward Enter to Claude
+            return True, output_buffer  # Don't forward Enter to Claude
 
         # Check for toggle key (Ctrl+A)
         toggle_key = self.config.get("toggle_key", "\x01").encode()
@@ -256,7 +257,18 @@ class ClaudeWrapper:
                     f"Auto-approve toggled: {'ON' if self.auto_approve_enabled else 'OFF'}"
                 )
 
-            return True  # Don't forward toggle key to Claude
+            # If re-enabled, check if there's already a prompt in the buffer
+            if self.auto_approve_enabled and output_buffer:
+                if self.detector.is_permission_prompt(output_buffer):
+                    if self.debug:
+                        logging.debug("Detected existing prompt after re-enabling auto-approve")
+                    was_detected = self.approval_manager.start_countdown(
+                        output_buffer, self.auto_approve_delay
+                    )
+                    if was_detected:
+                        output_buffer = ""
+
+            return True, output_buffer  # Don't forward toggle key to Claude
 
         # Cancel countdown if user presses any other key
         if self.approval_manager.is_running():
@@ -264,7 +276,7 @@ class ClaudeWrapper:
 
         # Forward input to Claude
         os.write(self.master_fd, char)
-        return True
+        return True, output_buffer
 
     def _handle_claude_output(self, data: bytes, output_buffer: str) -> tuple[str, bool]:
         """
@@ -283,10 +295,8 @@ class ClaudeWrapper:
         # Write to stdout
         os.write(sys.stdout.fileno(), data)
 
-        # Add to buffer for prompt detection (only if auto-approve enabled)
-        if not self.auto_approve_enabled:
-            return output_buffer, False
-
+        # Always add to buffer for prompt detection (even when disabled)
+        # This ensures we have context when re-enabling auto-approve
         try:
             decoded = data.decode("utf-8", errors="replace")
             output_buffer += decoded
@@ -299,12 +309,13 @@ class ClaudeWrapper:
             trim_point = int(MAX_BUFFER_SIZE * 0.2)
             output_buffer = output_buffer[trim_point:]
 
-        # Check for prompts
+        # Only check for prompts if auto-approve is enabled
         was_detected = False
-        if self.detector.is_permission_prompt(output_buffer):
-            was_detected = self.approval_manager.start_countdown(
-                output_buffer, self.auto_approve_delay
-            )
+        if self.auto_approve_enabled:
+            if self.detector.is_permission_prompt(output_buffer):
+                was_detected = self.approval_manager.start_countdown(
+                    output_buffer, self.auto_approve_delay
+                )
 
         # Clear buffer if prompt detected
         if was_detected:
@@ -473,7 +484,8 @@ class ClaudeWrapper:
                             logging.debug("EOF on stdin")
                             break
 
-                        if not self._handle_user_input(char):
+                        should_continue, output_buffer = self._handle_user_input(char, output_buffer)
+                        if not should_continue:
                             break
                     except OSError as e:
                         logging.error(f"Error reading from stdin: {e}")
