@@ -5,10 +5,18 @@ __pycache__/
 *.so
 .Python
 
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+*.egg
+MANIFEST
+
 # Virtual environment
 venv/
 env/
 ENV/
+.venv/
 
 # IDE
 .vscode/
@@ -20,6 +28,19 @@ ENV/
 # OS
 .DS_Store
 Thumbs.db
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
+*.cover
+.hypothesis/
+
+# Type checking
+.mypy_cache/
+.dmypy.json
+dmypy.json
 
 # Logs
 *.log
