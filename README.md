@@ -51,16 +51,31 @@ go build -o claude-autoapprove main.go
 ## Quick Start
 
 ```bash
-# Run with default settings
+# Run with default settings (3 second countdown)
 ./claude-autoapprove
 
-# Pass arguments to Claude Code
+# Configure countdown delay
+./claude-autoapprove --delay 1
+
+# Pass arguments to Claude Code (use -- separator)
+./claude-autoapprove -- 'review this code'
+./claude-autoapprove --delay 5 -- 'help me debug this'
+
+# Show help
 ./claude-autoapprove --help
-./claude-autoapprove 'review this code'
+
+# Pass help to Claude (not the wrapper)
+./claude-autoapprove -- --help
 
 # Run from PATH (if installed)
-claude-autoapprove
+claude-autoapprove --delay 1 -- 'your prompt here'
 ```
+
+## Command-Line Options
+
+- `--delay N` - Set countdown delay in seconds (1-60, default: 3)
+- `--help` - Show help message
+- `--` - Separator between wrapper options and Claude arguments
 
 ## Keyboard Controls
 
@@ -73,7 +88,7 @@ claude-autoapprove
 
 1. **Terminal Setup**: Creates a pseudo-terminal (PTY) for the Claude process
 2. **Prompt Detection**: Monitors output for permission prompts using multi-factor scoring
-3. **Countdown**: Shows 3-second countdown in status bar at the bottom
+3. **Countdown**: Shows configurable countdown (default 3 seconds) in status bar at the bottom
 4. **User Control**: Allows instant approval (Enter), cancellation (any key), or toggle (Ctrl+A)
 5. **Auto-Execute**: Sends "yes" + Enter or just Enter based on prompt type
 
@@ -210,7 +225,6 @@ func (w *ClaudeWrapper) run(args []string) int   // Main entry point
 
 - Unix/macOS only (requires PTY support)
 - Assumes Claude Code binary is named `claude` and in PATH
-- Fixed 3-second countdown (not configurable without rebuilding)
 - Status bar always enabled
 
 ## License

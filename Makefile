@@ -6,7 +6,7 @@ INSTALL_PATH=/usr/local/bin
 build:
 	@echo "Building $(BINARY_NAME)..."
 	@go mod download
-	@go build -o $(BINARY_NAME) main.go
+	@go build -o $(BINARY_NAME) ./cmd/claude-autoapprove
 	@echo "✓ Built successfully: ./$(BINARY_NAME)"
 
 install: build
