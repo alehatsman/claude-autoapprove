@@ -29,7 +29,10 @@ jobs:
       run: go mod verify
 
     - name: Build
-      run: go build -v -o claude-autoapprove main.go
+      run: go build -v -o claude-autoapprove ./cmd/claude-autoapprove
+
+    - name: Run tests
+      run: go test -v ./...
 
     - name: Run go vet
       run: go vet ./...
