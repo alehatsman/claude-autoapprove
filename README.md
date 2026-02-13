@@ -24,25 +24,28 @@ A lightweight Go wrapper for Claude Code that automatically approves permission 
 - Claude Code CLI installed
 - Unix-like system (Linux, macOS)
 
-### Build from Source
+### Quick Install
 
 ```bash
 # Clone the repository
 git clone https://github.com/yourusername/claude-autoapprove.git
 cd claude-autoapprove
 
-# Build using the build script
+# Build and install to /usr/local/bin
+make install
+```
+
+### Build Only
+
+```bash
+# Just build the binary
+make build
+
+# Or use the build script
 ./build-go.sh
 
 # Or build directly
 go build -o claude-autoapprove main.go
-```
-
-### Install to PATH
-
-```bash
-# After building, optionally install to your PATH
-sudo cp claude-autoapprove /usr/local/bin/
 ```
 
 ## Quick Start
@@ -148,7 +151,20 @@ The code is organized into focused components within `main.go`:
 
 ## Development
 
-### Building
+### Makefile Targets
+
+```bash
+# Build the binary
+make build
+
+# Build and install to /usr/local/bin
+make install
+
+# Clean build artifacts
+make clean
+```
+
+### Manual Building
 
 ```bash
 # Build for current platform
