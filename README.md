@@ -1,111 +1,63 @@
 # Claude Auto-Approve
 
-[![Python Version](https://img.shields.io/badge/python-3.7%2B-blue.svg)](https://www.python.org/downloads/)
+[![Go Version](https://img.shields.io/badge/go-1.21%2B-blue.svg)](https://golang.org/dl/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
-A production-ready wrapper for Claude Code that automatically approves permission prompts after a configurable countdown, while still presenting actual questions for user input.
+A lightweight Go wrapper for Claude Code that automatically approves permission prompts after a configurable countdown, with a clean status bar interface.
 
 ## Features
 
-- **Auto-approve permissions** with configurable countdown timer
+- **Auto-approve permissions** with 3-second countdown timer
 - **Smart prompt detection** using multi-factor scoring system
-- **Rate limiting** to prevent runaway approvals
-- **Idle detection** fallback for stuck prompts
 - **Status bar** showing countdown and approval count
 - **Toggle auto-approve** on/off with Ctrl+A
-- **Comprehensive logging** for debugging
-- **Configurable** via JSON config file
-- **Production-ready** with full test coverage and CI/CD
-- **Modular architecture** with clean separation of concerns
+- **Instant approval** with Enter during countdown
+- **Cancel countdown** with any other key
+- **PTY-based** for full terminal compatibility
+- **Zero configuration** - works out of the box
 
 ## Installation
 
-### From Source
+### Prerequisites
+
+- Go 1.21 or later
+- Claude Code CLI installed
+- Unix-like system (Linux, macOS)
+
+### Build from Source
 
 ```bash
 # Clone the repository
 git clone https://github.com/yourusername/claude-autoapprove.git
 cd claude-autoapprove
 
-# Install in development mode
-pip install -e .
+# Build using the build script
+./build-go.sh
 
-# Or install with development dependencies
-pip install -e ".[dev]"
+# Or build directly
+go build -o claude-autoapprove main.go
 ```
 
-### From PyPI (once published)
+### Install to PATH
 
 ```bash
-pip install claude-autoapprove
+# After building, optionally install to your PATH
+sudo cp claude-autoapprove /usr/local/bin/
 ```
 
 ## Quick Start
 
 ```bash
 # Run with default settings
-claude-wrapper
-
-# Create a config file
-claude-wrapper --init-config
-
-# Run with custom delay
-claude-wrapper --delay 3
-
-# Run with debug logging
-claude-wrapper --debug
-
-# Disable auto-approve (just wrap Claude)
-claude-wrapper --no-auto-approve
+./claude-autoapprove
 
 # Pass arguments to Claude Code
-claude-wrapper -- --help
+./claude-autoapprove --help
+./claude-autoapprove 'review this code'
+
+# Run from PATH (if installed)
+claude-autoapprove
 ```
-
-## Configuration
-
-Create a configuration file at `~/.claude_wrapper.conf`:
-
-```json
-{
-  "auto_approve_delay": 1,
-  "debug": false,
-  "log_dir": "~/.claude_wrapper_logs",
-  "log_retention_days": 7,
-  "claude_path": "claude",
-  "auto_approve_enabled": true,
-  "show_status_bar": true,
-  "toggle_key": "\u0001",
-  "min_detection_score": 3,
-  "max_approvals_per_minute": 500,
-  "max_same_prompt_approvals": 5,
-  "idle_detection_enabled": true,
-  "idle_timeout_seconds": 2.5,
-  "patterns": {
-    "permission_indicators": [],
-    "text_input_indicators": [
-      "Type.*yes",
-      "Enter.*yes",
-      "\\(y/n\\)"
-    ]
-  }
-}
-```
-
-### Configuration Options
-
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `auto_approve_delay` | int | 1 | Seconds to wait before auto-approving |
-| `debug` | bool | false | Enable debug logging |
-| `auto_approve_enabled` | bool | true | Enable auto-approve on start |
-| `show_status_bar` | bool | true | Show status bar at bottom |
-| `min_detection_score` | int | 3 | Minimum score to detect permission prompt |
-| `max_approvals_per_minute` | int | 500 | Maximum total approvals per minute |
-| `max_same_prompt_approvals` | int | 5 | Maximum approvals of same prompt in 60s |
-| `idle_detection_enabled` | bool | true | Enable idle detection fallback |
-| `idle_timeout_seconds` | float | 2.5 | Seconds before idle approval |
 
 ## Keyboard Controls
 
@@ -114,104 +66,136 @@ Create a configuration file at `~/.claude_wrapper.conf`:
 - **Ctrl+A**: Toggle auto-approve on/off
 - **Esc**: Cancel (passed to Claude)
 
-## Usage as a Library
+## How It Works
 
-```python
-from claude_autoapprove import ClaudeWrapper, Config
+1. **Terminal Setup**: Creates a pseudo-terminal (PTY) for the Claude process
+2. **Prompt Detection**: Monitors output for permission prompts using multi-factor scoring
+3. **Countdown**: Shows 3-second countdown in status bar at the bottom
+4. **User Control**: Allows instant approval (Enter), cancellation (any key), or toggle (Ctrl+A)
+5. **Auto-Execute**: Sends "yes" + Enter or just Enter based on prompt type
 
-# Create configuration
-config = Config()
-config.set("auto_approve_delay", 2)
-config.set("debug", True)
+### Detection Algorithm
 
-# Create and run wrapper
-wrapper = ClaudeWrapper(config)
-exit_code = wrapper.run()
+The wrapper scores each output chunk based on indicators:
+
+**Strong indicators (score +2-3):**
+- "Permission rule"
+- "Do you want to proceed?" / "Would you like to proceed?"
+- File operation prompts (create/edit/delete/modify/write)
+- Yes/No button patterns ("1. Yes", "2. No")
+
+**Moderate indicators (score +1):**
+- "Esc to cancel"
+- "Tab to amend"
+- "Enter to approve/confirm"
+- "(y/n)" prompt pattern
+
+**Threshold:** Score ≥ 3 to trigger auto-approve
+
+**Safety:** Code blocks (```) automatically zero the score
+
+## Status Bar
+
+The status bar at the bottom shows:
+
+```
+Ready (auto-approve ON) [Ctrl+A=toggle]
+⏱  Auto-approving in 3s... (Enter=now, any key=cancel, Ctrl+A=off)
+✓ Auto-approved (#1)
+✗ Auto-approve DISABLED
 ```
 
-## Development
+## Project Structure
 
-### Setup
-
-```bash
-# Install development dependencies
-pip install -e ".[dev]"
-
-# Install pre-commit hooks
-pre-commit install
 ```
-
-### Running Tests
-
-```bash
-# Run all tests with coverage
-pytest --cov=claude_autoapprove --cov-report=term --cov-report=html
-
-# Run specific test file
-pytest tests/unit/test_config.py
-
-# Run with verbose output
-pytest -v
-```
-
-### Code Quality
-
-```bash
-# Format code
-black src tests
-
-# Sort imports
-isort src tests
-
-# Lint
-flake8 src tests
-
-# Type check
-mypy src
-
-# Run all pre-commit hooks
-pre-commit run --all-files
+.
+├── main.go              # Main source file (~520 lines)
+├── go.mod               # Go module definition
+├── go.sum               # Go dependencies
+├── build-go.sh          # Build script
+├── claude-autoapprove   # Compiled binary
+├── README.md            # This file
+├── LICENSE              # MIT License
+├── SIMPLE_VERSIONS.md   # Version history
+├── docs/                # Documentation
+└── examples/            # Example usage
 ```
 
 ## Architecture
 
-The package is organized into focused modules:
+The code is organized into focused components within `main.go`:
 
-- `constants.py` (~40 lines) - Configuration constants and patterns
-- `exceptions.py` (~30 lines) - Custom exception classes
-- `utils.py` (~100 lines) - Utility functions
-- `config.py` (~200 lines) - Configuration management
-- `terminal.py` (~200 lines) - Terminal and status bar management
-- `detection.py` (~280 lines) - Prompt detection and rate limiting
-- `approval.py` (~250 lines) - Approval countdown logic
-- `wrapper.py` (~450 lines) - Main orchestration
-- `cli.py` (~150 lines) - Command-line interface
-
-Total: ~1,700 lines (vs. original 1,200-line monolithic file)
-
-## How It Works
-
-1. **Terminal Setup**: Creates a pseudo-terminal (PTY) and configures scrolling regions
-2. **Prompt Detection**: Uses multi-factor scoring to identify permission prompts
-3. **Countdown**: Shows countdown (configurable) in status bar
-4. **User Input**: Allows cancellation or immediate approval
-5. **Rate Limiting**: Prevents approval loops with duplicate detection
-6. **Idle Detection**: Fallback mechanism for stuck prompts
+- **Prompt Detection** (`isPrompt`, `needsYes`) - Pattern matching and scoring
+- **ClaudeWrapper** struct - Main state management
+- **Terminal Management** - PTY setup, sizing, scrolling regions
+- **Status Bar** - Drawing and clearing status messages
+- **Countdown Logic** - Goroutine-based countdown with cancellation
+- **I/O Handling** - Multiplexed stdin/stdout with the Claude process
+- **User Input** - Keyboard control (toggle, cancel, instant approve)
 
 ## Safety Features
 
 - **Smart Detection**: Requires multiple indicators (score ≥ 3) to avoid false positives
-- **Rate Limiting**: Blocks repeated approvals of the same prompt
-- **Global Rate Limit**: Maximum approvals per minute
-- **Code Block Protection**: Never auto-approves within code blocks
-- **Length Checks**: Reduces score for suspiciously long text
-- **User Control**: Easy toggle and cancellation
+- **Code Block Protection**: Never auto-approves within code blocks (```)
+- **User Control**: Easy toggle (Ctrl+A) and cancellation (any key)
+- **Visual Feedback**: Clear status bar showing countdown and state
+- **Configurable Countdown**: 3-second delay gives time to cancel
+
+## Dependencies
+
+- [`github.com/creack/pty`](https://github.com/creack/pty) - PTY interface for Go
+- [`golang.org/x/term`](https://golang.org/x/term) - Terminal control
+
+## Development
+
+### Building
+
+```bash
+# Build for current platform
+go build -o claude-autoapprove main.go
+
+# Build with optimizations
+go build -ldflags="-s -w" -o claude-autoapprove main.go
+
+# Cross-compile for Linux
+GOOS=linux GOARCH=amd64 go build -o claude-autoapprove-linux main.go
+
+# Cross-compile for macOS
+GOOS=darwin GOARCH=amd64 go build -o claude-autoapprove-macos main.go
+```
+
+### Code Overview
+
+Key types and functions:
+
+```go
+type ClaudeWrapper struct {
+    autoApprove         bool              // Current auto-approve state
+    ptmx                *os.File          // PTY master
+    buffer              string            // Output buffer for detection
+    countdownRunning    bool              // Countdown state
+    approvalCount       int               // Total approvals
+    // ... terminal state, channels, etc.
+}
+
+func isPrompt(text string) (bool, int)           // Detect permission prompts
+func needsYes(text string) bool                  // Check if "yes" text needed
+func (w *ClaudeWrapper) run(args []string) int   // Main entry point
+```
 
 ## Requirements
 
-- Python 3.7+
-- Unix-like system (Linux, macOS)
-- Claude Code CLI installed
+- **Go**: 1.21 or later
+- **OS**: Unix-like system (Linux, macOS) - uses PTY
+- **Claude Code**: CLI must be in PATH
+- **Terminal**: ANSI escape code support
+
+## Known Limitations
+
+- Unix/macOS only (requires PTY support)
+- Assumes Claude Code binary is named `claude` and in PATH
+- Fixed 3-second countdown (not configurable without rebuilding)
+- Status bar always enabled
 
 ## License
 
