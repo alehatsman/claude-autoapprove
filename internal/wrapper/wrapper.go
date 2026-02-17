@@ -152,7 +152,7 @@ func (w *ClaudeWrapper) toggleAutoApprove() {
 	}
 
 	time.Sleep(800 * time.Millisecond)
-	w.term.ClearStatus(w.autoApprove, w.approvalCount)
+	w.term.ClearStatus(w.autoApprove, w.approvalCount, w.countdownSeconds)
 
 	// Check buffer for existing prompt if re-enabled
 	if w.autoApprove {
@@ -166,6 +166,27 @@ func (w *ClaudeWrapper) toggleAutoApprove() {
 				w.startCountdown()
 			}
 		}
+	}
+}
+
+// changeDelay increases or decreases the countdown delay
+func (w *ClaudeWrapper) changeDelay(increase bool) {
+	oldDelay := w.countdownSeconds
+
+	if increase {
+		if w.countdownSeconds < 60 {
+			w.countdownSeconds++
+		}
+	} else {
+		if w.countdownSeconds > 1 {
+			w.countdownSeconds--
+		}
+	}
+
+	if oldDelay != w.countdownSeconds {
+		w.term.DrawStatus(fmt.Sprintf("⏱  Delay changed: %ds → %ds", oldDelay, w.countdownSeconds), "36")
+		time.Sleep(800 * time.Millisecond)
+		w.term.ClearStatus(w.autoApprove, w.approvalCount, w.countdownSeconds)
 	}
 }
 
@@ -188,7 +209,7 @@ func (w *ClaudeWrapper) countdownAndApprove(seconds int) {
 
 			w.term.DrawStatus("✗ Auto-approve cancelled", "90")
 			time.Sleep(300 * time.Millisecond)
-			w.term.ClearStatus(w.autoApprove, w.approvalCount)
+			w.term.ClearStatus(w.autoApprove, w.approvalCount, w.countdownSeconds)
 
 			// Signal main loop to re-check buffer after a short delay
 			go func() {
@@ -213,7 +234,7 @@ func (w *ClaudeWrapper) countdownAndApprove(seconds int) {
 
 		w.term.DrawStatus("✗ Auto-approve cancelled", "90")
 		time.Sleep(300 * time.Millisecond)
-		w.term.ClearStatus(w.autoApprove, w.approvalCount)
+		w.term.ClearStatus(w.autoApprove, w.approvalCount, w.countdownSeconds)
 
 		// Signal main loop to re-check buffer after a short delay
 		go func() {
@@ -269,7 +290,7 @@ approve:
 			w.countdownLock.Unlock()
 			w.term.DrawStatus("✗ Failed to send approval", "31")
 			time.Sleep(1 * time.Second)
-			w.term.ClearStatus(w.autoApprove, w.approvalCount)
+			w.term.ClearStatus(w.autoApprove, w.approvalCount, w.countdownSeconds)
 			return
 		}
 		time.Sleep(100 * time.Millisecond)
@@ -286,7 +307,7 @@ approve:
 			w.countdownLock.Unlock()
 			w.term.DrawStatus("✗ Failed to send approval", "31")
 			time.Sleep(1 * time.Second)
-			w.term.ClearStatus(w.autoApprove, w.approvalCount)
+			w.term.ClearStatus(w.autoApprove, w.approvalCount, w.countdownSeconds)
 			return
 		}
 	} else {
@@ -303,7 +324,7 @@ approve:
 			w.countdownLock.Unlock()
 			w.term.DrawStatus("✗ Failed to send approval", "31")
 			time.Sleep(1 * time.Second)
-			w.term.ClearStatus(w.autoApprove, w.approvalCount)
+			w.term.ClearStatus(w.autoApprove, w.approvalCount, w.countdownSeconds)
 			return
 		}
 	}
@@ -322,7 +343,7 @@ approve:
 	w.countdownRunning = false
 	w.countdownLock.Unlock()
 
-	w.term.ClearStatus(w.autoApprove, w.approvalCount)
+	w.term.ClearStatus(w.autoApprove, w.approvalCount, w.countdownSeconds)
 
 	// Signal main loop to re-check buffer after approval
 	// This catches any new prompts that arrived during approval execution
@@ -377,9 +398,23 @@ func (w *ClaudeWrapper) handleUserInput(data []byte) bool {
 		return true
 	}
 
-	// Ctrl+A = toggle
+	// Ctrl+A = toggle auto-approve
 	if len(data) == 1 && data[0] == 0x01 {
 		w.toggleAutoApprove()
+		return true
+	}
+
+	// Ctrl+Up arrow = increase delay (not during countdown)
+	// ESC[1;5A is the sequence for Ctrl+Up
+	if !countdownRunning && len(data) >= 6 && string(data[:6]) == "\x1b[1;5A" {
+		w.changeDelay(true)
+		return true
+	}
+
+	// Ctrl+Down arrow = decrease delay (not during countdown)
+	// ESC[1;5B is the sequence for Ctrl+Down
+	if !countdownRunning && len(data) >= 6 && string(data[:6]) == "\x1b[1;5B" {
+		w.changeDelay(false)
 		return true
 	}
 
@@ -531,7 +566,7 @@ func (w *ClaudeWrapper) Run(args []string) int {
 	// Clear screen and setup terminal
 	fmt.Fprint(os.Stdout, "\033[2J\033[H")
 	w.term.UpdateSize()
-	w.term.ClearStatus(w.autoApprove, w.approvalCount)
+	w.term.ClearStatus(w.autoApprove, w.approvalCount, w.countdownSeconds)
 
 	// Handle signals in background
 	go func() {
@@ -540,7 +575,7 @@ func (w *ClaudeWrapper) Run(args []string) int {
 			case sig := <-sigChan:
 				if sig == syscall.SIGWINCH {
 					w.term.UpdateSize()
-					w.term.ClearStatus(w.autoApprove, w.approvalCount)
+					w.term.ClearStatus(w.autoApprove, w.approvalCount, w.countdownSeconds)
 				} else {
 					w.cleanup()
 					if signal, ok := sig.(syscall.Signal); ok {
@@ -649,7 +684,7 @@ func (w *ClaudeWrapper) Run(args []string) int {
 		case <-statusRefreshTicker.C:
 			// Periodically refresh the status bar to keep it visible
 			if !w.countdownRunning {
-				w.term.ClearStatus(w.autoApprove, w.approvalCount)
+				w.term.ClearStatus(w.autoApprove, w.approvalCount, w.countdownSeconds)
 			}
 
 		case <-watchdogTicker.C:

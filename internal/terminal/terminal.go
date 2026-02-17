@@ -83,15 +83,15 @@ func (t *Terminal) DrawStatus(message, color string) {
 }
 
 // ClearStatus shows ready state in status bar
-func (t *Terminal) ClearStatus(autoApprove bool, approvalCount int) {
+func (t *Terminal) ClearStatus(autoApprove bool, approvalCount int, delaySeconds int) {
 	if autoApprove {
-		msg := "Ready (auto-approve ON) [Ctrl+A=toggle]"
+		msg := fmt.Sprintf("Ready (auto-approve ON, %ds delay) [Ctrl+A=toggle, Ctrl+↑↓=delay]", delaySeconds)
 		if approvalCount > 0 {
-			msg = fmt.Sprintf("Ready (auto-approve ON, %d executed) [Ctrl+A=toggle]", approvalCount)
+			msg = fmt.Sprintf("Ready (auto-approve ON, %d executed, %ds delay) [Ctrl+A=toggle, Ctrl+↑↓=delay]", approvalCount, delaySeconds)
 		}
 		t.DrawStatus(msg, "2")
 	} else {
-		t.DrawStatus("Ready (auto-approve OFF) [Ctrl+A=toggle]", "90")
+		t.DrawStatus(fmt.Sprintf("Ready (auto-approve OFF, %ds delay) [Ctrl+A=toggle, Ctrl+↑↓=delay]", delaySeconds), "90")
 	}
 }
 
