@@ -48,6 +48,10 @@ type ClaudeWrapper struct {
 	countdownLock       sync.Mutex
 	countdownWg         sync.WaitGroup
 
+	// Watchdog state (for detecting missed prompts)
+	lastActivityTime time.Time
+	activityLock     sync.Mutex
+
 	// Thread safety
 	bufferLock sync.Mutex
 }
@@ -84,6 +88,7 @@ func NewWithConfig(cfg *Config) *ClaudeWrapper {
 		countdownCancelled:  make(chan struct{}),
 		countdownApproveNow: make(chan struct{}),
 		recheckBuffer:       make(chan struct{}, 1),
+		lastActivityTime:    time.Now(),
 	}
 }
 
@@ -318,6 +323,16 @@ approve:
 	w.countdownLock.Unlock()
 
 	w.term.ClearStatus(w.autoApprove, w.approvalCount)
+
+	// Signal main loop to re-check buffer after approval
+	// This catches any new prompts that arrived during approval execution
+	go func() {
+		time.Sleep(200 * time.Millisecond)
+		select {
+		case w.recheckBuffer <- struct{}{}:
+		default:
+		}
+	}()
 }
 
 // startCountdown starts the countdown thread
@@ -333,6 +348,11 @@ func (w *ClaudeWrapper) startCountdown() {
 
 	w.countdownRunning = true
 	w.countdownApproveNow = make(chan struct{})
+
+	// Update activity time when starting countdown
+	w.activityLock.Lock()
+	w.lastActivityTime = time.Now()
+	w.activityLock.Unlock()
 
 	w.countdownWg.Add(1)
 	go func() {
@@ -485,7 +505,10 @@ func (w *ClaudeWrapper) Run(args []string) int {
 	var err error
 	w.ptmx, err = pty.Start(w.cmd)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to start claude: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Error: Failed to start claude: %v\n", err)
+		fmt.Fprintf(os.Stderr, "\nMake sure:\n")
+		fmt.Fprintf(os.Stderr, "  - 'claude' command is installed and in your PATH\n")
+		fmt.Fprintf(os.Stderr, "  - You have permission to create PTY devices\n")
 		return 1
 	}
 	defer w.cleanup()
@@ -496,7 +519,12 @@ func (w *ClaudeWrapper) Run(args []string) int {
 	// Save terminal state and set raw mode
 	w.oldState, err = term.MakeRaw(int(os.Stdin.Fd()))
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: claude-autoapprove requires an interactive terminal (TTY)\n")
 		fmt.Fprintf(os.Stderr, "Failed to set raw mode: %v\n", err)
+		fmt.Fprintf(os.Stderr, "\nPlease run this command directly in your terminal, not:\n")
+		fmt.Fprintf(os.Stderr, "  - Through a pipe or redirection\n")
+		fmt.Fprintf(os.Stderr, "  - In a non-interactive script\n")
+		fmt.Fprintf(os.Stderr, "  - From an automation tool without TTY allocation\n")
 		return 1
 	}
 
@@ -581,6 +609,10 @@ func (w *ClaudeWrapper) Run(args []string) int {
 	statusRefreshTicker := time.NewTicker(500 * time.Millisecond)
 	defer statusRefreshTicker.Stop()
 
+	// Watchdog timer to detect missed prompts (check every 10 seconds)
+	watchdogTicker := time.NewTicker(10 * time.Second)
+	defer watchdogTicker.Stop()
+
 	// Main I/O loop
 	for {
 		select {
@@ -593,7 +625,7 @@ func (w *ClaudeWrapper) Run(args []string) int {
 			w.handleClaudeOutput(data)
 
 		case <-w.recheckBuffer:
-			// Re-check buffer for prompts after countdown cancellation
+			// Re-check buffer for prompts after countdown cancellation or approval
 			w.countdownLock.Lock()
 			countdownRunning := w.countdownRunning
 			w.countdownLock.Unlock()
@@ -606,6 +638,9 @@ func (w *ClaudeWrapper) Run(args []string) int {
 				if bufferCopy != "" {
 					detected, _ := detection.IsPrompt(bufferCopy)
 					if detected {
+						if debug.Logger != nil {
+							debug.Logger.Printf(">>> RECHECK: Detected new prompt in buffer <<<")
+						}
 						w.startCountdown()
 					}
 				}
@@ -615,6 +650,33 @@ func (w *ClaudeWrapper) Run(args []string) int {
 			// Periodically refresh the status bar to keep it visible
 			if !w.countdownRunning {
 				w.term.ClearStatus(w.autoApprove, w.approvalCount)
+			}
+
+		case <-watchdogTicker.C:
+			// Watchdog: check if we've been idle for 10+ seconds
+			w.activityLock.Lock()
+			idleTime := time.Since(w.lastActivityTime)
+			w.activityLock.Unlock()
+
+			w.countdownLock.Lock()
+			countdownRunning := w.countdownRunning
+			w.countdownLock.Unlock()
+
+			// If we're idle for 10+ seconds, auto-approve is on, and no countdown running
+			if idleTime >= 10*time.Second && w.autoApprove && !countdownRunning {
+				w.bufferLock.Lock()
+				bufferCopy := w.buffer
+				w.bufferLock.Unlock()
+
+				if bufferCopy != "" {
+					detected, _ := detection.IsPrompt(bufferCopy)
+					if detected {
+						if debug.Logger != nil {
+							debug.Logger.Printf(">>> WATCHDOG TRIGGERED: Detected missed prompt after %v idle <<<", idleTime)
+						}
+						w.startCountdown()
+					}
+				}
 			}
 
 		case err := <-errChan:
