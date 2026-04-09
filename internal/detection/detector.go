@@ -8,9 +8,9 @@ import (
 )
 
 // ANSI escape code patterns
-var ansiCursorPattern = regexp.MustCompile(`\x1b\[[\d;]*[ABCDEFGHJKfsu]`) // Cursor movements - replace with space
+var ansiCursorPattern = regexp.MustCompile(`\x1b\[[\d;]*[ABCDEFGHJKfsu]`)                          // Cursor movements - replace with space
 var ansiEscapePattern = regexp.MustCompile(`\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~]|\][^\x07]*\x07)`) // All ANSI codes
-var controlChars = regexp.MustCompile(`[\x00-\x08\x0B-\x0C\x0E-\x1F]`) // Control chars except \t, \n, \r
+var controlChars = regexp.MustCompile(`[\x00-\x08\x0B-\x0C\x0E-\x1F]`)                             // Control chars except \t, \n, \r
 
 // StripANSI removes ANSI escape codes from text, replacing cursor movements with spaces
 func StripANSI(text string) string {
@@ -80,8 +80,8 @@ func IsPrompt(text string) (bool, int) {
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
 		if strings.HasPrefix(trimmed, "//") ||
-		   strings.HasPrefix(trimmed, "#") ||
-		   strings.HasPrefix(trimmed, "*") {
+			strings.HasPrefix(trimmed, "#") ||
+			strings.HasPrefix(trimmed, "*") {
 			commentLineCount++
 		}
 	}

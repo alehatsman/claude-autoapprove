@@ -38,8 +38,8 @@ Enter to approve | Esc to cancel`,
 			minScore: 6,
 		},
 		{
-			name: "Simple y/n prompt",
-			input: `Type 'yes' to continue (y/n)`,
+			name:     "Simple y/n prompt",
+			input:    `Type 'yes' to continue (y/n)`,
 			expected: true,
 			minScore: 3,
 		},
@@ -85,23 +85,23 @@ func TestIsPrompt_FalsePositives(t *testing.T) {
 		input string
 	}{
 		{
-			name: "Code example with mock prompt",
+			name:  "Code example with mock prompt",
 			input: "```\nDo you want to proceed?\n1. Yes\n2. No\n```",
 		},
 		{
-			name: "Regular conversation",
+			name:  "Regular conversation",
 			input: "Here's how to implement the feature. Do you want me to explain more?",
 		},
 		{
-			name: "Documentation text",
+			name:  "Documentation text",
 			input: `The system will ask "Do you want to proceed?" with options Yes/No.`,
 		},
 		{
-			name: "Code comment about prompts",
+			name:  "Code comment about prompts",
 			input: `// This function shows a prompt: "Enter to approve"`,
 		},
 		{
-			name: "Incomplete prompt (no UI elements)",
+			name:  "Incomplete prompt (no UI elements)",
 			input: `Do you want to create a file? Yes or No?`,
 		},
 	}
@@ -215,18 +215,18 @@ func TestIsPrompt_CodeBlockSafety(t *testing.T) {
 		detected bool
 	}{
 		{
-			name: "Inside code block (odd backticks)",
-			input: "```\nDo you want to proceed?\n1. Yes\n2. No\nEnter to approve",
+			name:     "Inside code block (odd backticks)",
+			input:    "```\nDo you want to proceed?\n1. Yes\n2. No\nEnter to approve",
 			detected: false,
 		},
 		{
-			name: "Outside code block (even backticks)",
-			input: "```\ncode here\n```\n\nDo you want to proceed?\n1. Yes\n2. No\nEnter to approve",
+			name:     "Outside code block (even backticks)",
+			input:    "```\ncode here\n```\n\nDo you want to proceed?\n1. Yes\n2. No\nEnter to approve",
 			detected: true,
 		},
 		{
-			name: "Multiple closed code blocks",
-			input: "```\nblock1\n```\n```\nblock2\n```\n\nDo you want to proceed?\n1. Yes\n2. No\nEnter to approve",
+			name:     "Multiple closed code blocks",
+			input:    "```\nblock1\n```\n```\nblock2\n```\n\nDo you want to proceed?\n1. Yes\n2. No\nEnter to approve",
 			detected: true,
 		},
 	}
@@ -302,8 +302,8 @@ Proceed with changes?
 			expected: true,
 		},
 		{
-			name: "No UI elements (should not detect)",
-			input: `This is just regular text about yes and no options.`,
+			name:     "No UI elements (should not detect)",
+			input:    `This is just regular text about yes and no options.`,
 			expected: false,
 		},
 	}
@@ -343,8 +343,8 @@ Enter to approve | Esc to cancel`,
 			expected: true,
 		},
 		{
-			name: "Weak indicators only",
-			input: `This mentions yes and no but has no UI elements`,
+			name:     "Weak indicators only",
+			input:    `This mentions yes and no but has no UI elements`,
 			expected: false,
 		},
 	}
@@ -363,11 +363,11 @@ Enter to approve | Esc to cancel`,
 func TestIsPrompt_RealWorldBuffer(t *testing.T) {
 	// Simulate real PTY output with ANSI codes and partial content
 	realBuffer := "\x1b[2J\x1b[H\x1b[32mClaude:\x1b[0m I'll help you create that file.\n\n" +
-	              "Permission rule\n\n" +
-	              "Do you want to \x1b[1mcreate\x1b[0m the file \x1b[33mmain.go\x1b[0m?\n\n" +
-	              "\x1b[36m1. Yes\x1b[0m\n" +
-	              "\x1b[36m2. No\x1b[0m\n\n" +
-	              "\x1b[90mEsc to cancel\x1b[0m | \x1b[32mEnter to approve\x1b[0m"
+		"Permission rule\n\n" +
+		"Do you want to \x1b[1mcreate\x1b[0m the file \x1b[33mmain.go\x1b[0m?\n\n" +
+		"\x1b[36m1. Yes\x1b[0m\n" +
+		"\x1b[36m2. No\x1b[0m\n\n" +
+		"\x1b[90mEsc to cancel\x1b[0m | \x1b[32mEnter to approve\x1b[0m"
 
 	detected, score := IsPrompt(realBuffer)
 	if !detected {

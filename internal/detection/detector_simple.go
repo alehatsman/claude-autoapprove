@@ -19,34 +19,34 @@ func IsPromptSimple(text string) (bool, int) {
 
 	// 1. APPROVAL BUTTONS (strongest indicator)
 	hasYesButton := strings.Contains(clean, "1. Yes") ||
-	                strings.Contains(clean, "1) Yes") ||
-	                strings.Contains(clean, "• Yes")
+		strings.Contains(clean, "1) Yes") ||
+		strings.Contains(clean, "• Yes")
 
 	noButtonPattern := regexp.MustCompile(`[23][\.\)]\s*No|•\s*No`)
 	hasNoButton := noButtonPattern.MatchString(clean)
 
 	if hasYesButton && hasNoButton {
-		score += 5  // Very strong indicator
+		score += 5 // Very strong indicator
 		matchedIndicators = append(matchedIndicators, "yes_no_buttons")
 	}
 
 	// 2. UI INSTRUCTION ELEMENTS
 	hasEnterApprove := strings.Contains(clean, "Enter to approve") ||
-	                   strings.Contains(clean, "Enter to confirm")
+		strings.Contains(clean, "Enter to confirm")
 	if hasEnterApprove {
-		score += 3  // Strong indicator
+		score += 3 // Strong indicator
 		matchedIndicators = append(matchedIndicators, "enter_to_approve")
 	}
 
 	hasEscCancel := strings.Contains(clean, "Esc to cancel")
 	if hasEscCancel {
-		score += 2  // Medium indicator
+		score += 2 // Medium indicator
 		matchedIndicators = append(matchedIndicators, "esc_to_cancel")
 	}
 
 	hasTabAmend := strings.Contains(clean, "Tab to amend")
 	if hasTabAmend {
-		score += 2  // Medium indicator
+		score += 2 // Medium indicator
 		matchedIndicators = append(matchedIndicators, "tab_to_amend")
 	}
 
@@ -72,10 +72,10 @@ func IsPromptSimple(text string) (bool, int) {
 
 	// QUALITY CHECK: Require at least a question mark or colon (indicates actual prompt)
 	hasQuestionOrPrompt := strings.Contains(clean, "?") ||
-	                       strings.Contains(clean, ":") ||
-	                       strings.Contains(clean, "Permission rule")
+		strings.Contains(clean, ":") ||
+		strings.Contains(clean, "Permission rule")
 	if !hasQuestionOrPrompt && score > 0 {
-		score = score / 2  // Reduce confidence if no question/prompt indicator
+		score = score / 2 // Reduce confidence if no question/prompt indicator
 	}
 
 	// DEBUG LOGGING
@@ -110,11 +110,11 @@ func IsPromptUltraSimple(text string) (bool, int) {
 	// 2. At least one other UI element
 
 	hasYesNo := (strings.Contains(clean, "1. Yes") || strings.Contains(clean, "1) Yes")) &&
-	            (strings.Contains(clean, "2. No") || strings.Contains(clean, "3. No") ||
-	             strings.Contains(clean, "2) No") || strings.Contains(clean, "3) No"))
+		(strings.Contains(clean, "2. No") || strings.Contains(clean, "3. No") ||
+			strings.Contains(clean, "2) No") || strings.Contains(clean, "3) No"))
 
 	hasEnterApprove := strings.Contains(clean, "Enter to approve") ||
-	                   strings.Contains(clean, "Enter to confirm")
+		strings.Contains(clean, "Enter to confirm")
 
 	hasEscCancel := strings.Contains(clean, "Esc to cancel")
 	hasPermissionRule := strings.Contains(clean, "Permission rule")

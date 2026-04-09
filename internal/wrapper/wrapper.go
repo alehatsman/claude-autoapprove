@@ -41,13 +41,13 @@ type ClaudeWrapper struct {
 	term *terminal.Terminal
 
 	// Countdown state
-	countdownRunning         bool
-	countdownCancelled       chan struct{}
-	countdownApproveNow      chan struct{}
-	recheckBuffer            chan string // carries text snapshot to check; empty string = recheck current buffer
-	bufferAtCountdownStart   int        // buffer byte-length when current countdown started; watermark for new-content detection
-	countdownLock            sync.Mutex
-	countdownWg              sync.WaitGroup
+	countdownRunning       bool
+	countdownCancelled     chan struct{}
+	countdownApproveNow    chan struct{}
+	recheckBuffer          chan string // carries text snapshot to check; empty string = recheck current buffer
+	bufferAtCountdownStart int         // buffer byte-length when current countdown started; watermark for new-content detection
+	countdownLock          sync.Mutex
+	countdownWg            sync.WaitGroup
 
 	// Thread safety
 	bufferLock sync.Mutex

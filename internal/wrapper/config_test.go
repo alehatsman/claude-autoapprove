@@ -4,34 +4,34 @@ import "testing"
 
 func TestNewWithConfig(t *testing.T) {
 	tests := []struct {
-		name         string
-		config       *Config
+		name          string
+		config        *Config
 		wantCountdown int
-		wantBuffer   int
+		wantBuffer    int
 	}{
 		{
-			name: "Default config",
-			config: nil,
+			name:          "Default config",
+			config:        nil,
 			wantCountdown: 1,
-			wantBuffer: 10000,
+			wantBuffer:    10000,
 		},
 		{
 			name: "Custom countdown",
 			config: &Config{
 				CountdownSeconds: 1,
-				BufferSize: 10000,
+				BufferSize:       10000,
 			},
 			wantCountdown: 1,
-			wantBuffer: 10000,
+			wantBuffer:    10000,
 		},
 		{
 			name: "Custom buffer size",
 			config: &Config{
 				CountdownSeconds: 3,
-				BufferSize: 5000,
+				BufferSize:       5000,
 			},
 			wantCountdown: 3,
-			wantBuffer: 5000,
+			wantBuffer:    5000,
 		},
 		{
 			name: "Zero countdown allowed",
@@ -55,10 +55,10 @@ func TestNewWithConfig(t *testing.T) {
 			name: "Large countdown allowed",
 			config: &Config{
 				CountdownSeconds: 60,
-				BufferSize: 10000,
+				BufferSize:       10000,
 			},
 			wantCountdown: 60,
-			wantBuffer: 10000,
+			wantBuffer:    10000,
 		},
 	}
 

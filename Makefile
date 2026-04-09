@@ -1,4 +1,4 @@
-.PHONY: build install clean
+.PHONY: build install clean format
 
 BINARY_NAME=claude-autoapprove
 INSTALL_PATH=/usr/local/bin
@@ -15,6 +15,9 @@ install: build
 	@sudo cp $(BINARY_NAME) $(INSTALL_PATH)/$(BINARY_NAME)
 	# @sudo chmod +x $(INSTALL_PATH)/$(BINARY_NAME)
 	@echo "✓ Installed successfully: $(INSTALL_PATH)/$(BINARY_NAME)"
+
+format:
+	@gofmt -w .
 
 clean:
 	@echo "Cleaning up..."
