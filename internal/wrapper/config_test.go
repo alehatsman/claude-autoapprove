@@ -12,7 +12,7 @@ func TestNewWithConfig(t *testing.T) {
 		{
 			name: "Default config",
 			config: nil,
-			wantCountdown: 3,
+			wantCountdown: 1,
 			wantBuffer: 10000,
 		},
 		{
@@ -34,13 +34,22 @@ func TestNewWithConfig(t *testing.T) {
 			wantBuffer: 5000,
 		},
 		{
-			name: "Invalid values get defaults",
+			name: "Zero countdown allowed",
 			config: &Config{
 				CountdownSeconds: 0,
-				BufferSize: -100,
+				BufferSize:       10000,
 			},
-			wantCountdown: 3,
-			wantBuffer: 10000,
+			wantCountdown: 0,
+			wantBuffer:    10000,
+		},
+		{
+			name: "Invalid values get defaults",
+			config: &Config{
+				CountdownSeconds: -1,
+				BufferSize:       -100,
+			},
+			wantCountdown: 1,
+			wantBuffer:    10000,
 		},
 		{
 			name: "Large countdown allowed",
@@ -80,8 +89,8 @@ func TestNewWithConfig(t *testing.T) {
 func TestNew(t *testing.T) {
 	w := New()
 
-	if w.countdownSeconds != 3 {
-		t.Errorf("New() should use default countdown of 3, got %d", w.countdownSeconds)
+	if w.countdownSeconds != 1 {
+		t.Errorf("New() should use default countdown of 1, got %d", w.countdownSeconds)
 	}
 
 	if w.maxBuffer != 10000 {

@@ -41,16 +41,13 @@ type ClaudeWrapper struct {
 	term *terminal.Terminal
 
 	// Countdown state
-	countdownRunning    bool
-	countdownCancelled  chan struct{}
-	countdownApproveNow chan struct{}
-	recheckBuffer       chan struct{}
-	countdownLock       sync.Mutex
-	countdownWg         sync.WaitGroup
-
-	// Watchdog state (for detecting missed prompts)
-	lastActivityTime time.Time
-	activityLock     sync.Mutex
+	countdownRunning         bool
+	countdownCancelled       chan struct{}
+	countdownApproveNow      chan struct{}
+	recheckBuffer            chan string // carries text snapshot to check; empty string = recheck current buffer
+	bufferAtCountdownStart   int        // buffer byte-length when current countdown started; watermark for new-content detection
+	countdownLock            sync.Mutex
+	countdownWg              sync.WaitGroup
 
 	// Thread safety
 	bufferLock sync.Mutex
@@ -59,7 +56,7 @@ type ClaudeWrapper struct {
 // New creates a new wrapper instance with default config
 func New() *ClaudeWrapper {
 	return NewWithConfig(&Config{
-		CountdownSeconds: 3,
+		CountdownSeconds: 1,
 		BufferSize:       10000,
 	})
 }
@@ -68,14 +65,14 @@ func New() *ClaudeWrapper {
 func NewWithConfig(cfg *Config) *ClaudeWrapper {
 	if cfg == nil {
 		cfg = &Config{
-			CountdownSeconds: 3,
+			CountdownSeconds: 1,
 			BufferSize:       10000,
 		}
 	}
 
 	// Apply defaults
-	if cfg.CountdownSeconds <= 0 {
-		cfg.CountdownSeconds = 3
+	if cfg.CountdownSeconds < 0 {
+		cfg.CountdownSeconds = 1
 	}
 	if cfg.BufferSize <= 0 {
 		cfg.BufferSize = 10000
@@ -87,8 +84,7 @@ func NewWithConfig(cfg *Config) *ClaudeWrapper {
 		countdownSeconds:    cfg.CountdownSeconds,
 		countdownCancelled:  make(chan struct{}),
 		countdownApproveNow: make(chan struct{}),
-		recheckBuffer:       make(chan struct{}, 1),
-		lastActivityTime:    time.Now(),
+		recheckBuffer:       make(chan string, 2),
 	}
 }
 
@@ -178,7 +174,7 @@ func (w *ClaudeWrapper) changeDelay(increase bool) {
 			w.countdownSeconds++
 		}
 	} else {
-		if w.countdownSeconds > 1 {
+		if w.countdownSeconds > 0 {
 			w.countdownSeconds--
 		}
 	}
@@ -194,14 +190,24 @@ func (w *ClaudeWrapper) changeDelay(increase bool) {
 func (w *ClaudeWrapper) countdownAndApprove(seconds int) {
 	defer w.countdownWg.Done()
 
+	// Capture the channels that belong to THIS countdown instance at goroutine
+	// start.  startCountdown replaces w.countdownCancelled and
+	// w.countdownApproveNow (under countdownLock) when it starts a new
+	// countdown.  Reading the struct fields inside the select loop races with
+	// those writes; using local copies avoids the race entirely.
+	w.countdownLock.Lock()
+	cancelled := w.countdownCancelled
+	approveNow := w.countdownApproveNow
+	w.countdownLock.Unlock()
+
 	for i := seconds; i > 0; i-- {
 		// Show countdown message first
 		w.term.DrawStatus(fmt.Sprintf("⏱  Auto-approving in %ds... (Enter=now, any key=cancel, Ctrl+A=off)", i), "33")
 
 		select {
-		case <-w.countdownApproveNow:
+		case <-approveNow:
 			goto approve
-		case <-w.countdownCancelled:
+		case <-cancelled:
 			// Mark countdown as finished immediately
 			w.countdownLock.Lock()
 			w.countdownRunning = false
@@ -215,7 +221,7 @@ func (w *ClaudeWrapper) countdownAndApprove(seconds int) {
 			go func() {
 				time.Sleep(500 * time.Millisecond)
 				select {
-				case w.recheckBuffer <- struct{}{}:
+				case w.recheckBuffer <- "":
 				default:
 				}
 			}()
@@ -226,7 +232,7 @@ func (w *ClaudeWrapper) countdownAndApprove(seconds int) {
 	}
 
 	select {
-	case <-w.countdownCancelled:
+	case <-cancelled:
 		// Mark countdown as finished immediately
 		w.countdownLock.Lock()
 		w.countdownRunning = false
@@ -240,7 +246,7 @@ func (w *ClaudeWrapper) countdownAndApprove(seconds int) {
 		go func() {
 			time.Sleep(500 * time.Millisecond)
 			select {
-			case w.recheckBuffer <- struct{}{}:
+			case w.recheckBuffer <- "":
 			default:
 			}
 		}()
@@ -333,54 +339,102 @@ approve:
 		debug.Logger.Printf(">>> APPROVAL SENT <<<")
 	}
 
-	// Clear buffer after approval is sent to prevent re-detection
-	w.bufferLock.Lock()
-	w.buffer = ""
-	w.bufferLock.Unlock()
-
-	// Mark countdown as finished BEFORE cleanup so new prompts can be detected
+	// Mark countdown as finished BEFORE clearing buffer so that any bytes
+	// that arrived while countdown was running (and were buffered but skipped)
+	// can be detected by the immediate recheck below.
 	w.countdownLock.Lock()
 	w.countdownRunning = false
 	w.countdownLock.Unlock()
 
+	// Recheck and clear: grab accumulated buffer, clear it, then check for new prompt.
+	// Read bufferAtCountdownStart under bufferLock (same lock used by startCountdown
+	// to write it) to avoid a data race with a concurrent startCountdown call.
+	w.bufferLock.Lock()
+	accumulated := w.buffer
+	w.buffer = ""
+	watermark := w.bufferAtCountdownStart
+	w.bufferLock.Unlock()
+
 	w.term.ClearStatus(w.autoApprove, w.approvalCount, w.countdownSeconds)
 
-	// Signal main loop to re-check buffer after approval
-	// This catches any new prompts that arrived during approval execution
+	// Check for a GENUINELY NEW prompt in accumulated — content that arrived AFTER
+	// the countdown started (not the dialog that triggered the countdown itself).
+	// Using the watermark prevents re-detecting the already-approved dialog, which
+	// would otherwise cause a spurious second countdown and an unwanted "\r" keypress.
+	//
+	// IMPORTANT: do NOT call startCountdown() from here — this goroutine is registered
+	// in countdownWg, so startCountdown's Wait() call would deadlock.
+	// Instead, send the new-content snapshot to the main loop via recheckBuffer.
+	if watermark > len(accumulated) {
+		// Buffer was trimmed during countdown; fall back to checking all accumulated.
+		// This is rare (requires >maxBuffer bytes during a single countdown period).
+		watermark = 0
+	}
+	newContent := accumulated[watermark:]
+	if w.autoApprove && len(newContent) > 10 {
+		detected, _ := detection.IsPrompt(newContent)
+		if detected {
+			if debug.Logger != nil {
+				debug.Logger.Printf(">>> CONSECUTIVE PROMPT: new content detected after watermark=%d, len=%d <<<",
+					watermark, len(newContent))
+			}
+			select {
+			case w.recheckBuffer <- newContent:
+			default:
+				// Channel full; fallback to empty recheck — main loop will use current buffer
+				select {
+				case w.recheckBuffer <- "":
+				default:
+				}
+			}
+			return
+		}
+	}
+
+	// Signal main loop to re-check buffer after a short delay.
+	// This catches prompts that arrive slightly after approval is processed.
 	go func() {
-		time.Sleep(200 * time.Millisecond)
+		time.Sleep(300 * time.Millisecond)
 		select {
-		case w.recheckBuffer <- struct{}{}:
+		case w.recheckBuffer <- "":
 		default:
 		}
 	}()
 }
 
-// startCountdown starts the countdown thread
+// startCountdown starts the countdown thread.
+// Must only be called from the main goroutine (not from countdownAndApprove itself)
+// to avoid WaitGroup deadlocks.
 func (w *ClaudeWrapper) startCountdown() {
 	w.countdownLock.Lock()
-	defer w.countdownLock.Unlock()
 
 	if w.countdownRunning {
 		close(w.countdownCancelled)
 		w.countdownCancelled = make(chan struct{})
+		// Release lock BEFORE Wait so the running goroutine can acquire it to
+		// set countdownRunning=false. Holding the lock here causes a deadlock.
+		w.countdownLock.Unlock()
 		w.countdownWg.Wait()
+		w.countdownLock.Lock()
 	}
 
 	w.countdownRunning = true
 	w.countdownApproveNow = make(chan struct{})
 
-	// Update activity time when starting countdown
-	w.activityLock.Lock()
-	w.lastActivityTime = time.Now()
-	w.activityLock.Unlock()
+	// Record how many bytes are already in the buffer so that accumulated-content
+	// checks after approval only examine content that arrived DURING this countdown,
+	// not the dialog that triggered it (which would cause a spurious re-approval).
+	w.bufferLock.Lock()
+	w.bufferAtCountdownStart = len(w.buffer)
+	w.bufferLock.Unlock()
 
 	w.countdownWg.Add(1)
 	go func() {
 		w.countdownAndApprove(w.countdownSeconds)
-		// countdownRunning is now set to false inside countdownAndApprove
+		// countdownRunning is set to false inside countdownAndApprove
 		// to allow immediate detection of new prompts after approval
 	}()
+	w.countdownLock.Unlock()
 }
 
 // handleUserInput processes input from user
@@ -390,7 +444,7 @@ func (w *ClaudeWrapper) handleUserInput(data []byte) bool {
 	w.countdownLock.Unlock()
 
 	// Enter during countdown = approve immediately
-	if countdownRunning && (data[0] == '\r' || data[0] == '\n') {
+	if countdownRunning && len(data) > 0 && (data[0] == '\r' || data[0] == '\n') {
 		select {
 		case w.countdownApproveNow <- struct{}{}:
 		default:
@@ -644,8 +698,8 @@ func (w *ClaudeWrapper) Run(args []string) int {
 	statusRefreshTicker := time.NewTicker(500 * time.Millisecond)
 	defer statusRefreshTicker.Stop()
 
-	// Watchdog timer to detect missed prompts (check every 10 seconds)
-	watchdogTicker := time.NewTicker(10 * time.Second)
+	// Watchdog timer to detect missed prompts (check every 500ms)
+	watchdogTicker := time.NewTicker(500 * time.Millisecond)
 	defer watchdogTicker.Stop()
 
 	// Main I/O loop
@@ -659,8 +713,43 @@ func (w *ClaudeWrapper) Run(args []string) int {
 		case data := <-ptmxChan:
 			w.handleClaudeOutput(data)
 
-		case <-w.recheckBuffer:
-			// Re-check buffer for prompts after countdown cancellation or approval
+		case text := <-w.recheckBuffer:
+			// Re-check for prompts after countdown cancellation, approval, or consecutive detection.
+			// If text is non-empty it is a snapshot that already contains a confirmed prompt
+			// (sent by countdownAndApprove). Otherwise fall back to the live buffer.
+			w.countdownLock.Lock()
+			countdownRunning := w.countdownRunning
+			w.countdownLock.Unlock()
+
+			if w.autoApprove && !countdownRunning {
+				checkText := text
+				if checkText == "" {
+					w.bufferLock.Lock()
+					checkText = w.buffer
+					w.bufferLock.Unlock()
+				}
+				if checkText != "" {
+					detected, _ := detection.IsPrompt(checkText)
+					if detected {
+						if debug.Logger != nil {
+							debug.Logger.Printf(">>> RECHECK: Detected prompt (snapshot=%v) <<<", text != "")
+						}
+						w.startCountdown()
+					}
+				}
+			}
+
+		case <-statusRefreshTicker.C:
+			// Periodically refresh the status bar to keep it visible
+			w.countdownLock.Lock()
+			ticking := w.countdownRunning
+			w.countdownLock.Unlock()
+			if !ticking {
+				w.term.ClearStatus(w.autoApprove, w.approvalCount, w.countdownSeconds)
+			}
+
+		case <-watchdogTicker.C:
+			// Periodic buffer check: catch any missed prompts
 			w.countdownLock.Lock()
 			countdownRunning := w.countdownRunning
 			w.countdownLock.Unlock()
@@ -674,40 +763,7 @@ func (w *ClaudeWrapper) Run(args []string) int {
 					detected, _ := detection.IsPrompt(bufferCopy)
 					if detected {
 						if debug.Logger != nil {
-							debug.Logger.Printf(">>> RECHECK: Detected new prompt in buffer <<<")
-						}
-						w.startCountdown()
-					}
-				}
-			}
-
-		case <-statusRefreshTicker.C:
-			// Periodically refresh the status bar to keep it visible
-			if !w.countdownRunning {
-				w.term.ClearStatus(w.autoApprove, w.approvalCount, w.countdownSeconds)
-			}
-
-		case <-watchdogTicker.C:
-			// Watchdog: check if we've been idle for 10+ seconds
-			w.activityLock.Lock()
-			idleTime := time.Since(w.lastActivityTime)
-			w.activityLock.Unlock()
-
-			w.countdownLock.Lock()
-			countdownRunning := w.countdownRunning
-			w.countdownLock.Unlock()
-
-			// If we're idle for 10+ seconds, auto-approve is on, and no countdown running
-			if idleTime >= 10*time.Second && w.autoApprove && !countdownRunning {
-				w.bufferLock.Lock()
-				bufferCopy := w.buffer
-				w.bufferLock.Unlock()
-
-				if bufferCopy != "" {
-					detected, _ := detection.IsPrompt(bufferCopy)
-					if detected {
-						if debug.Logger != nil {
-							debug.Logger.Printf(">>> WATCHDOG TRIGGERED: Detected missed prompt after %v idle <<<", idleTime)
+							debug.Logger.Printf(">>> PERIODIC CHECK: Detected missed prompt <<<")
 						}
 						w.startCountdown()
 					}

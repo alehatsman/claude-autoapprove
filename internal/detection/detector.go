@@ -37,11 +37,19 @@ func StripANSI(text string) string {
 // This focuses on the UI chrome that Claude Code controls, not Claude's responses
 // Returns (isPrompt bool, score int)
 func IsPrompt(text string) (bool, int) {
+	// Only examine the tail of the buffer - the permission dialog is always the most
+	// recent content. Checking the full buffer causes false rejections when old code
+	// output (with comments, backticks, etc.) dominates the buffer content.
+	const tailSize = 3000
+	if len(text) > tailSize {
+		text = text[len(text)-tailSize:]
+	}
+
 	clean := StripANSI(text)
 	score := 0
 	matchedIndicators := []string{}
 
-	// SAFETY FIRST: Reject if inside code block or if most content is code
+	// SAFETY FIRST: Reject if inside code block
 	backtickCount := strings.Count(clean, "```")
 
 	// Odd number = inside unclosed code block
@@ -66,7 +74,7 @@ func IsPrompt(text string) (bool, int) {
 	}
 
 	// Reject if this looks like a comment or documentation
-	// Comments usually have // or # or * at the start of lines
+	// Only check recent lines to avoid old code content causing false rejections
 	lines := strings.Split(clean, "\n")
 	commentLineCount := 0
 	for _, line := range lines {
@@ -77,8 +85,8 @@ func IsPrompt(text string) (bool, int) {
 			commentLineCount++
 		}
 	}
-	// If more than 50% of lines are comments, probably not a real prompt
-	if len(lines) > 0 && commentLineCount > len(lines)/2 {
+	// If more than 70% of lines are comments, probably documentation/code not a real prompt
+	if len(lines) > 0 && commentLineCount*10 > len(lines)*7 {
 		return false, 0
 	}
 

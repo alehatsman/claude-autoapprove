@@ -11,7 +11,7 @@ import (
 
 func main() {
 	// Parse flags
-	delay := flag.Int("delay", 3, "Countdown delay in seconds before auto-approving")
+	delay := flag.Int("delay", 1, "Countdown delay in seconds before auto-approving")
 	help := flag.Bool("help", false, "Show help message")
 
 	flag.Usage = func() {
@@ -39,8 +39,8 @@ func main() {
 	}
 
 	// Validate delay
-	if *delay < 1 {
-		fmt.Fprintf(os.Stderr, "Error: delay must be at least 1 second\n")
+	if *delay < 0 {
+		fmt.Fprintf(os.Stderr, "Error: delay must be at least 0 seconds\n")
 		os.Exit(1)
 	}
 	if *delay > 60 {
