@@ -33,146 +33,79 @@ func StripANSI(text string) string {
 	return text
 }
 
-// IsPrompt detects if text is a permission prompt using UI element detection
-// This focuses on the UI chrome that Claude Code controls, not Claude's responses
+// IsPrompt detects if text is a permission prompt using UI element detection.
+// Only the last 50 lines are examined — the permission dialog is always the most
+// recent output, so earlier content (code, comments, backticks) is irrelevant.
 // Returns (isPrompt bool, score int)
 func IsPrompt(text string) (bool, int) {
-	// Only examine the tail of the buffer - the permission dialog is always the most
-	// recent content. Checking the full buffer causes false rejections when old code
-	// output (with comments, backticks, etc.) dominates the buffer content.
-	const tailSize = 3000
-	if len(text) > tailSize {
-		text = text[len(text)-tailSize:]
-	}
-
 	clean := StripANSI(text)
+
+	// Take the last 50 lines — the dialog is always at the tail
+	lines := strings.Split(clean, "\n")
+	const tailLines = 50
+	if len(lines) > tailLines {
+		lines = lines[len(lines)-tailLines:]
+	}
+	tail := strings.Join(lines, "\n")
+
 	score := 0
 	matchedIndicators := []string{}
 
-	// SAFETY FIRST: Reject if inside code block
-	backtickCount := strings.Count(clean, "```")
-
-	// Odd number = inside unclosed code block
-	if backtickCount%2 == 1 {
-		return false, 0
-	}
-
-	// Even number but > 0 = closed code blocks exist
-	// Check if potential prompt is actually inside the code blocks
-	if backtickCount >= 2 {
-		// Find the last occurrence of ```
-		lastBacktickPos := strings.LastIndex(clean, "```")
-		// If UI elements appear before the last ```, they're likely inside code
-		enterPos := strings.Index(clean, "Enter to approve")
-		if enterPos > 0 && enterPos < lastBacktickPos {
-			return false, 0
-		}
-		yesPos := strings.Index(clean, "1. Yes")
-		if yesPos > 0 && yesPos < lastBacktickPos {
-			return false, 0
-		}
-	}
-
-	// Reject if this looks like a comment or documentation
-	// Only check recent lines to avoid old code content causing false rejections
-	lines := strings.Split(clean, "\n")
-	commentLineCount := 0
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "//") ||
-			strings.HasPrefix(trimmed, "#") ||
-			strings.HasPrefix(trimmed, "*") {
-			commentLineCount++
-		}
-	}
-	// If more than 70% of lines are comments, probably documentation/code not a real prompt
-	if len(lines) > 0 && commentLineCount*10 > len(lines)*7 {
-		return false, 0
-	}
-
-	// UI CHROME DETECTION (controlled by Claude Code, not Claude's responses)
-	// These patterns should be 100% consistent
-
 	// 1. YES/NO BUTTONS (strongest indicator - Claude Code's button UI)
-	hasYesButton := strings.Contains(clean, "1. Yes") ||
-		strings.Contains(clean, "1) Yes") ||
-		strings.Contains(clean, "• Yes")
+	hasYesButton := strings.Contains(tail, "1. Yes") ||
+		strings.Contains(tail, "1) Yes") ||
+		strings.Contains(tail, "• Yes")
 
 	yesNoPattern := regexp.MustCompile(`[23][\.\)]\s*No|•\s*No`)
-	hasNoButton := yesNoPattern.MatchString(clean)
+	hasNoButton := yesNoPattern.MatchString(tail)
 
 	if hasYesButton && hasNoButton {
 		score += 5
 		matchedIndicators = append(matchedIndicators, "yes_no_buttons")
 	}
 
-	// 2. ENTER TO APPROVE (strong indicator - primary action UI)
-	hasEnterApprove := strings.Contains(clean, "Enter to approve") ||
-		strings.Contains(clean, "Enter to confirm")
-	if hasEnterApprove {
+	// 2. ENTER TO APPROVE / CONFIRM (primary action UI)
+	if strings.Contains(tail, "Enter to approve") || strings.Contains(tail, "Enter to confirm") {
 		score += 3
 		matchedIndicators = append(matchedIndicators, "enter_to_approve")
 	}
 
-	// 3. ESC TO CANCEL (medium indicator - secondary action UI)
-	if strings.Contains(clean, "Esc to cancel") {
+	// 3. ESC TO CANCEL (secondary action UI)
+	if strings.Contains(tail, "Esc to cancel") {
 		score += 2
 		matchedIndicators = append(matchedIndicators, "esc_to_cancel")
 	}
 
-	// 4. TAB TO AMEND (medium indicator - tertiary action UI)
-	if strings.Contains(clean, "Tab to amend") {
+	// 4. TAB TO AMEND (tertiary action UI)
+	if strings.Contains(tail, "Tab to amend") {
 		score += 2
 		matchedIndicators = append(matchedIndicators, "tab_to_amend")
 	}
 
-	// 5. Y/N PROMPT (strong indicator - simple prompt format)
-	ynPattern := regexp.MustCompile(`\(y/n\)\s*$`)
-	if ynPattern.MatchString(clean) {
+	// 5. Y/N PROMPT
+	if regexp.MustCompile(`\(y/n\)\s*$`).MatchString(tail) {
 		score += 3
 		matchedIndicators = append(matchedIndicators, "yn_prompt")
 	}
 
-	// 6. PERMISSION RULE HEADER (strong indicator - official prompt identifier)
-	if strings.Contains(clean, "Permission rule") {
+	// 6. PERMISSION RULE HEADER
+	if strings.Contains(tail, "Permission rule") {
 		score += 3
 		matchedIndicators = append(matchedIndicators, "permission_rule")
 	}
 
-	// 7. ADDITIONAL CONTEXT (optional - adds confidence if present)
-	// These are less reliable but can add context
-	if strings.Contains(clean, "Do you want to proceed?") {
-		score++
-		matchedIndicators = append(matchedIndicators, "proceed_phrase")
-	}
-	if strings.Contains(clean, "Would you like to proceed?") {
-		score++
-		matchedIndicators = append(matchedIndicators, "would_like_phrase")
-	}
-
 	// DEBUG LOGGING
-	shouldLog := debug.Logger != nil && (score > 0 || len(matchedIndicators) > 0)
-	if shouldLog {
-		lastChunk := clean
-		if len(clean) > 600 {
-			lastChunk = clean[len(clean)-600:]
+	if debug.Logger != nil && score > 0 {
+		debug.Logger.Printf("DETECTION: score=%d, indicators=%v", score, matchedIndicators)
+		lastChunk := tail
+		if len(lastChunk) > 600 {
+			lastChunk = lastChunk[len(lastChunk)-600:]
 		}
-		debug.Logger.Printf("DETECTION: score=%d, indicators=%v, backticks=%d", score, matchedIndicators, backtickCount)
-		if score > 0 {
-			debug.Logger.Printf("Buffer tail (last 600):\n%s\n", lastChunk)
-		}
+		debug.Logger.Printf("Tail (last 600):\n%s\n", lastChunk)
 	}
 
-	// THRESHOLD: Need score >= 3 to trigger
-	// This requires at least one of:
-	// - "Yes/No buttons" (5) [STRONGEST]
-	// - "Enter to approve" (3)
-	// - "Permission rule" (3)
-	// - "y/n" prompt (3)
-	// - "Esc to cancel" (2) + "Tab to amend" (2)
-	detected := score >= 3
-
-	return detected, score
+	// Score >= 3 required: at least one strong indicator
+	return score >= 3, score
 }
 
 // NeedsYes checks if prompt needs 'yes' text (vs just Enter)

@@ -41,9 +41,9 @@ func (t *Terminal) UpdateSize() error {
 	t.ContentRows = max(1, height-2)
 	t.StatusBarRow = t.ContentRows + 1
 
-	// Set PTY size
+	// Set PTY size to content area only — Claude must not render into the status bar rows
 	winsize := &pty.Winsize{
-		Rows: uint16(height),
+		Rows: uint16(t.ContentRows),
 		Cols: uint16(width),
 	}
 	if err := pty.Setsize(t.ptmx, winsize); err != nil {

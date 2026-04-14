@@ -79,10 +79,7 @@ func TestNewWithConfig(t *testing.T) {
 				t.Error("autoApprove should be true by default")
 			}
 
-			if w.recheckBuffer == nil {
-				t.Error("recheckBuffer channel should be initialized")
-			}
-		})
+			})
 	}
 }
 

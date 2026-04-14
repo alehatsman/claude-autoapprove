@@ -56,12 +56,18 @@ Tab to amend | Esc to cancel | Enter to approve`,
 			minScore: 7,
 		},
 		{
-			name: "Bash command permission",
+			name: "Bash command permission (Enter to confirm)",
 			input: `Allow running bash command?
 
 Enter to confirm | Esc to cancel`,
 			expected: true,
 			minScore: 3,
+		},
+		{
+			name: "Bash command permission (new hint format with ctrl+e)",
+			input: " Bash command\n\n   ls -la /some/path/ | head -30\n   Run shell command\n\n Permission rule Bash requires confirmation for this command.\n\n Do you want to proceed?\n ❯ 1. Yes\n   2. No\n\n Esc to cancel · Tab to amend · ctrl+e to explain",
+			expected: true,
+			minScore: 9,
 		},
 	}
 
@@ -85,20 +91,12 @@ func TestIsPrompt_FalsePositives(t *testing.T) {
 		input string
 	}{
 		{
-			name:  "Code example with mock prompt",
-			input: "```\nDo you want to proceed?\n1. Yes\n2. No\n```",
-		},
-		{
 			name:  "Regular conversation",
 			input: "Here's how to implement the feature. Do you want me to explain more?",
 		},
 		{
 			name:  "Documentation text",
 			input: `The system will ask "Do you want to proceed?" with options Yes/No.`,
-		},
-		{
-			name:  "Code comment about prompts",
-			input: `// This function shows a prompt: "Enter to approve"`,
 		},
 		{
 			name:  "Incomplete prompt (no UI elements)",
@@ -215,9 +213,13 @@ func TestIsPrompt_CodeBlockSafety(t *testing.T) {
 		detected bool
 	}{
 		{
+			// We no longer filter based on backtick context — the last-50-lines approach
+			// means we detect UI patterns wherever they appear. In practice, Claude won't
+			// show a real permission dialog inside a code block, but if it does explain
+			// one, the worst case is a spurious Enter press.
 			name:     "Inside code block (odd backticks)",
 			input:    "```\nDo you want to proceed?\n1. Yes\n2. No\nEnter to approve",
-			detected: false,
+			detected: true,
 		},
 		{
 			name:     "Outside code block (even backticks)",
