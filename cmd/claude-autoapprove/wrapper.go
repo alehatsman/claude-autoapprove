@@ -93,9 +93,10 @@ type ClaudeWrapper struct {
 	statusMsgColor string
 	statusMsgUntil time.Time
 
-	// Rescue tracking
-	lastOutputTime time.Time
-	lastRescueTime time.Time
+	// Rescue / periodic redraw tracking
+	lastOutputTime  time.Time
+	lastRescueTime  time.Time
+	lastRedrawTime  time.Time
 }
 
 func New() *ClaudeWrapper {
@@ -425,6 +426,10 @@ func (w *ClaudeWrapper) Run(args []string) int {
 				w.executeApproval()
 			}
 			w.checkBuffer()
+			if !w.countdownActive && time.Since(w.lastRedrawTime) >= time.Second {
+				w.lastRedrawTime = time.Now()
+				w.term.ForceRedraw()
+			}
 			w.drawStatus()
 
 		case sig := <-sigChan:
