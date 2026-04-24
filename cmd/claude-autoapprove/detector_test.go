@@ -1,11 +1,10 @@
-package detection
+package main
 
 import (
 	"strings"
 	"testing"
 )
 
-// Test cases based on REAL Claude Code permission prompts
 func TestIsPrompt_RealPromptExamples(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -64,8 +63,8 @@ Enter to confirm | Esc to cancel`,
 			minScore: 3,
 		},
 		{
-			name: "Bash command permission (new hint format with ctrl+e)",
-			input: " Bash command\n\n   ls -la /some/path/ | head -30\n   Run shell command\n\n Permission rule Bash requires confirmation for this command.\n\n Do you want to proceed?\n ❯ 1. Yes\n   2. No\n\n Esc to cancel · Tab to amend · ctrl+e to explain",
+			name:     "Bash command permission (new hint format with ctrl+e)",
+			input:    " Bash command\n\n   ls -la /some/path/ | head -30\n   Run shell command\n\n Permission rule Bash requires confirmation for this command.\n\n Do you want to proceed?\n ❯ 1. Yes\n   2. No\n\n Esc to cancel · Tab to amend · ctrl+e to explain",
 			expected: true,
 			minScore: 9,
 		},
@@ -84,7 +83,6 @@ Enter to confirm | Esc to cancel`,
 	}
 }
 
-// Test that we DON'T detect false positives
 func TestIsPrompt_FalsePositives(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -114,7 +112,6 @@ func TestIsPrompt_FalsePositives(t *testing.T) {
 	}
 }
 
-// Test ANSI stripping
 func TestStripANSI(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -150,62 +147,37 @@ func TestStripANSI(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := StripANSI(tt.input)
-			// Normalize whitespace for comparison
-			result = strings.TrimSpace(result)
+			result := strings.TrimSpace(StripANSI(tt.input))
 			expected := strings.TrimSpace(tt.expected)
 			if result != expected {
-				t.Errorf("Expected '%s', got '%s'", expected, result)
+				t.Errorf("Expected %q, got %q", expected, result)
 			}
 		})
 	}
 }
 
-// Test NeedsYes detection
 func TestNeedsYes(t *testing.T) {
 	tests := []struct {
 		name     string
 		input    string
 		expected bool
 	}{
-		{
-			name:     "Explicit type yes",
-			input:    "Type 'yes' to continue",
-			expected: true,
-		},
-		{
-			name:     "Enter yes pattern",
-			input:    "Enter yes to confirm",
-			expected: true,
-		},
-		{
-			name:     "y/n shorthand",
-			input:    "Proceed? (y/n)",
-			expected: true,
-		},
-		{
-			name:     "Just Enter needed",
-			input:    "Enter to approve",
-			expected: false,
-		},
-		{
-			name:     "Button-based prompt",
-			input:    "1. Yes\n2. No\nEnter to approve",
-			expected: false,
-		},
+		{"Explicit type yes", "Type 'yes' to continue", true},
+		{"Enter yes pattern", "Enter yes to confirm", true},
+		{"y/n shorthand", "Proceed? (y/n)", true},
+		{"Just Enter needed", "Enter to approve", false},
+		{"Button-based prompt", "1. Yes\n2. No\nEnter to approve", false},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := NeedsYes(tt.input)
-			if result != tt.expected {
-				t.Errorf("Expected %v, got %v for input: %s", tt.expected, result, tt.input)
+			if got := NeedsYes(tt.input); got != tt.expected {
+				t.Errorf("NeedsYes(%q) = %v, want %v", tt.input, got, tt.expected)
 			}
 		})
 	}
 }
 
-// Test code block detection safety
 func TestIsPrompt_CodeBlockSafety(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -213,10 +185,6 @@ func TestIsPrompt_CodeBlockSafety(t *testing.T) {
 		detected bool
 	}{
 		{
-			// We no longer filter based on backtick context — the last-50-lines approach
-			// means we detect UI patterns wherever they appear. In practice, Claude won't
-			// show a real permission dialog inside a code block, but if it does explain
-			// one, the worst case is a spurious Enter press.
 			name:     "Inside code block (odd backticks)",
 			input:    "```\nDo you want to proceed?\n1. Yes\n2. No\nEnter to approve",
 			detected: true,
@@ -243,7 +211,23 @@ func TestIsPrompt_CodeBlockSafety(t *testing.T) {
 	}
 }
 
-// Benchmark detection performance
+func TestIsPrompt_RealWorldBuffer(t *testing.T) {
+	realBuffer := "\x1b[2J\x1b[H\x1b[32mClaude:\x1b[0m I'll help you create that file.\n\n" +
+		"Permission rule\n\n" +
+		"Do you want to \x1b[1mcreate\x1b[0m the file \x1b[33mmain.go\x1b[0m?\n\n" +
+		"\x1b[36m1. Yes\x1b[0m\n" +
+		"\x1b[36m2. No\x1b[0m\n\n" +
+		"\x1b[90mEsc to cancel\x1b[0m | \x1b[32mEnter to approve\x1b[0m"
+
+	detected, score := IsPrompt(realBuffer)
+	if !detected {
+		t.Errorf("Failed to detect real-world prompt (score=%d)", score)
+	}
+	if score < 6 {
+		t.Errorf("Expected score >= 6, got %d", score)
+	}
+}
+
 func BenchmarkIsPrompt(b *testing.B) {
 	prompt := `Permission rule
 
@@ -266,116 +250,5 @@ func BenchmarkStripANSI(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		StripANSI(text)
-	}
-}
-
-// Test simplified detector
-func TestIsPromptSimple(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    string
-		expected bool
-	}{
-		{
-			name: "Clear Yes/No buttons",
-			input: `Do you want to proceed?
-
-1. Yes
-2. No
-
-Enter to approve`,
-			expected: true,
-		},
-		{
-			name: "Enter to approve only",
-			input: `Allow this action?
-
-Enter to approve | Esc to cancel`,
-			expected: true,
-		},
-		{
-			name: "Permission rule header",
-			input: `Permission rule
-
-Proceed with changes?
-
-1. Yes
-2. No`,
-			expected: true,
-		},
-		{
-			name:     "No UI elements (should not detect)",
-			input:    `This is just regular text about yes and no options.`,
-			expected: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			detected, score := IsPromptSimple(tt.input)
-			if detected != tt.expected {
-				t.Errorf("Expected detected=%v, got %v (score=%d)", tt.expected, detected, score)
-			}
-		})
-	}
-}
-
-// Test ultra-simple detector
-func TestIsPromptUltraSimple(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    string
-		expected bool
-	}{
-		{
-			name: "Strong indicators present",
-			input: `Do you want to proceed?
-
-1. Yes
-2. No
-
-Esc to cancel | Enter to approve`,
-			expected: true,
-		},
-		{
-			name: "Only Enter to approve + Esc",
-			input: `Confirm action?
-
-Enter to approve | Esc to cancel`,
-			expected: true,
-		},
-		{
-			name:     "Weak indicators only",
-			input:    `This mentions yes and no but has no UI elements`,
-			expected: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			detected, _ := IsPromptUltraSimple(tt.input)
-			if detected != tt.expected {
-				t.Errorf("Expected detected=%v, got %v", tt.expected, detected)
-			}
-		})
-	}
-}
-
-// Test with real buffer content (partial prompts, ANSI codes)
-func TestIsPrompt_RealWorldBuffer(t *testing.T) {
-	// Simulate real PTY output with ANSI codes and partial content
-	realBuffer := "\x1b[2J\x1b[H\x1b[32mClaude:\x1b[0m I'll help you create that file.\n\n" +
-		"Permission rule\n\n" +
-		"Do you want to \x1b[1mcreate\x1b[0m the file \x1b[33mmain.go\x1b[0m?\n\n" +
-		"\x1b[36m1. Yes\x1b[0m\n" +
-		"\x1b[36m2. No\x1b[0m\n\n" +
-		"\x1b[90mEsc to cancel\x1b[0m | \x1b[32mEnter to approve\x1b[0m"
-
-	detected, score := IsPrompt(realBuffer)
-	if !detected {
-		t.Errorf("Failed to detect real-world prompt (score=%d)", score)
-	}
-	if score < 6 {
-		t.Errorf("Expected high confidence score >= 6, got %d", score)
 	}
 }

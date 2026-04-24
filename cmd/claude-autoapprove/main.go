@@ -4,14 +4,10 @@ import (
 	"flag"
 	"fmt"
 	"os"
-
-	"github.com/alehatsman/claude-autoapprove/internal/debug"
-	"github.com/alehatsman/claude-autoapprove/internal/wrapper"
 )
 
 func main() {
-	// Parse flags
-	delay := flag.Int("delay", 1, "Countdown delay in seconds before auto-approving")
+	delay := flag.Int("delay", 0, "Countdown delay in seconds before auto-approving (0-60)")
 	help := flag.Bool("help", false, "Show help message")
 
 	flag.Usage = func() {
@@ -38,7 +34,6 @@ func main() {
 		os.Exit(0)
 	}
 
-	// Validate delay
 	if *delay < 0 {
 		fmt.Fprintf(os.Stderr, "Error: delay must be at least 0 seconds\n")
 		os.Exit(1)
@@ -48,16 +43,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Remaining args are for Claude
-	claudeArgs := flag.Args()
+	initDebug()
 
-	debug.Init()
-
-	cfg := wrapper.Config{
-		CountdownSeconds: *delay,
-	}
-
-	w := wrapper.NewWithConfig(&cfg)
-	exitCode := w.Run(claudeArgs)
-	os.Exit(exitCode)
+	w := NewWithConfig(&Config{CountdownSeconds: *delay})
+	os.Exit(w.Run(flag.Args()))
 }
