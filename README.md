@@ -1,236 +1,97 @@
-# Claude Auto-Approve
+# claude-autoapprove
 
-[![Go Version](https://img.shields.io/badge/go-1.21%2B-blue.svg)](https://golang.org/dl/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+A lightweight PTY wrapper for Claude Code that automatically approves permission prompts.
 
-A lightweight Go wrapper for Claude Code that automatically approves permission prompts after a configurable countdown, with a clean status bar interface.
-
-## Features
-
-- **Auto-approve permissions** with 3-second countdown timer
-- **Smart prompt detection** using multi-factor scoring system
-- **Status bar** showing countdown and approval count
-- **Toggle auto-approve** on/off with Ctrl+A
-- **Instant approval** with Enter during countdown
-- **Cancel countdown** with any other key
-- **PTY-based** for full terminal compatibility
-- **Zero configuration** - works out of the box
-
-## Installation
-
-### Prerequisites
-
-- Go 1.21 or later
-- Claude Code CLI installed
-- Unix-like system (Linux, macOS)
-
-### Quick Install
+## Install
 
 ```bash
-# Clone the repository
 git clone https://github.com/yourusername/claude-autoapprove.git
 cd claude-autoapprove
-
-# Build and install to /usr/local/bin
-make install
+make install        # builds and copies to /usr/local/bin
 ```
 
-### Build Only
+Or just build locally:
 
 ```bash
-# Just build the binary
-make build
-
-# Or use the build script
-./build-go.sh
-
-# Or build directly
-go build -o claude-autoapprove main.go
+make build          # produces ./claude-autoapprove
 ```
 
-## Quick Start
+## Usage
 
 ```bash
-# Run with default settings (3 second countdown)
-./claude-autoapprove
+# Drop-in replacement for the claude command
+claude-autoapprove
 
-# Configure countdown delay
-./claude-autoapprove --delay 1
+# Pass a prompt directly
+claude-autoapprove -- 'refactor this module'
 
-# Pass arguments to Claude Code (use -- separator)
-./claude-autoapprove -- 'review this code'
-./claude-autoapprove --delay 5 -- 'help me debug this'
+# Add a 3-second countdown before each approval (default is 0)
+claude-autoapprove --delay 3
 
-# Show help
-./claude-autoapprove --help
-
-# Pass help to Claude (not the wrapper)
-./claude-autoapprove -- --help
-
-# Run from PATH (if installed)
-claude-autoapprove --delay 1 -- 'your prompt here'
+# Pass flags to Claude itself (use -- separator)
+claude-autoapprove -- --help
 ```
 
-## Command-Line Options
+## Options
 
-- `--delay N` - Set countdown delay in seconds (1-60, default: 3)
-- `--help` - Show help message
-- `--` - Separator between wrapper options and Claude arguments
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--delay N` | `0` | Seconds to wait before approving (0–60). Use a non-zero value if you want to review and cancel. |
+| `--help` | | Show help |
 
-## Keyboard Controls
+## Keyboard controls
 
-- **Enter** during countdown: Approve immediately
-- **Any key** during countdown: Cancel auto-approve
-- **Ctrl+A**: Toggle auto-approve on/off
-- **Esc**: Cancel (passed to Claude)
+| Key | Action |
+|-----|--------|
+| `Ctrl+A` | Toggle auto-approve on/off |
+| `Enter` | Approve immediately during countdown |
+| Any other key | Cancel countdown |
+| `Ctrl+↑` | Increase delay by 1s |
+| `Ctrl+↓` | Decrease delay by 1s |
 
-## How It Works
+## How it works
 
-1. **Terminal Setup**: Creates a pseudo-terminal (PTY) for the Claude process
-2. **Prompt Detection**: Monitors output for permission prompts using multi-factor scoring
-3. **Countdown**: Shows configurable countdown (default 3 seconds) in status bar at the bottom
-4. **User Control**: Allows instant approval (Enter), cancellation (any key), or toggle (Ctrl+A)
-5. **Auto-Execute**: Sends "yes" + Enter or just Enter based on prompt type
+The wrapper runs `claude` inside a PTY and proxies all I/O transparently. Output bytes flow straight through to your terminal untouched. In parallel, the wrapper accumulates a rolling buffer and scores it against known Claude Code permission dialog patterns ("1. Yes", "Enter to confirm", etc.). When the score crosses the threshold a countdown starts; when it expires (or Enter is pressed), `\r` or `yes\r` is written to the PTY input.
 
-### Detection Algorithm
+After each approval `ForceRedraw()` sends a brief PTY size toggle (`width-1` → `width`) to make Claude fully repaint its UI and surface any immediately-following dialog.
 
-The wrapper scores each output chunk based on indicators:
+A 200ms ticker runs two background jobs:
+- **Missed-prompt watchdog** — detects prompts that arrived while a countdown was active (and therefore blocked from detection).
+- **Idle rescue** — if Claude has been silent for 2+ seconds, triggers a `ForceRedraw()` so any pending dialog re-flows through the output path.
 
-**Strong indicators (score +2-3):**
-- "Permission rule"
-- "Do you want to proceed?" / "Would you like to proceed?"
-- File operation prompts (create/edit/delete/modify/write)
-- Yes/No button patterns ("1. Yes", "2. No")
+## Detection
 
-**Moderate indicators (score +1):**
-- "Esc to cancel"
-- "Tab to amend"
-- "Enter to approve/confirm"
-- "(y/n)" prompt pattern
+Scores the last 50 stripped lines of the buffer:
 
-**Threshold:** Score ≥ 3 to trigger auto-approve
+| Indicator | Score |
+|-----------|-------|
+| `1. Yes` + `2./3. No` buttons | +5 |
+| `Enter to approve` / `Enter to confirm` | +3 |
+| `(y/n)` at end of line | +3 |
+| `Permission rule` header | +3 |
+| `Esc to cancel` | +2 |
+| `Tab to amend` | +2 |
 
-**Safety:** Code blocks (```) automatically zero the score
-
-## Status Bar
-
-The status bar at the bottom shows:
-
-```
-Ready (auto-approve ON) [Ctrl+A=toggle]
-⏱  Auto-approving in 3s... (Enter=now, any key=cancel, Ctrl+A=off)
-✓ Auto-approved (#1)
-✗ Auto-approve DISABLED
-```
-
-## Project Structure
-
-```
-.
-├── main.go              # Main source file (~520 lines)
-├── go.mod               # Go module definition
-├── go.sum               # Go dependencies
-├── build-go.sh          # Build script
-├── claude-autoapprove   # Compiled binary
-├── README.md            # This file
-├── LICENSE              # MIT License
-├── SIMPLE_VERSIONS.md   # Version history
-├── docs/                # Documentation
-└── examples/            # Example usage
-```
-
-## Architecture
-
-The code is organized into focused components within `main.go`:
-
-- **Prompt Detection** (`isPrompt`, `needsYes`) - Pattern matching and scoring
-- **ClaudeWrapper** struct - Main state management
-- **Terminal Management** - PTY setup, sizing, scrolling regions
-- **Status Bar** - Drawing and clearing status messages
-- **Countdown Logic** - Goroutine-based countdown with cancellation
-- **I/O Handling** - Multiplexed stdin/stdout with the Claude process
-- **User Input** - Keyboard control (toggle, cancel, instant approve)
-
-## Safety Features
-
-- **Smart Detection**: Requires multiple indicators (score ≥ 3) to avoid false positives
-- **Code Block Protection**: Never auto-approves within code blocks (```)
-- **User Control**: Easy toggle (Ctrl+A) and cancellation (any key)
-- **Visual Feedback**: Clear status bar showing countdown and state
-- **Configurable Countdown**: 3-second delay gives time to cancel
+**Threshold:** ≥ 3 to trigger.
 
 ## Dependencies
 
-- [`github.com/creack/pty`](https://github.com/creack/pty) - PTY interface for Go
-- [`golang.org/x/term`](https://golang.org/x/term) - Terminal control
-
-## Development
-
-### Makefile Targets
-
-```bash
-# Build the binary
-make build
-
-# Build and install to /usr/local/bin
-make install
-
-# Clean build artifacts
-make clean
-```
-
-### Manual Building
-
-```bash
-# Build for current platform
-go build -o claude-autoapprove main.go
-
-# Build with optimizations
-go build -ldflags="-s -w" -o claude-autoapprove main.go
-
-# Cross-compile for Linux
-GOOS=linux GOARCH=amd64 go build -o claude-autoapprove-linux main.go
-
-# Cross-compile for macOS
-GOOS=darwin GOARCH=amd64 go build -o claude-autoapprove-macos main.go
-```
-
-### Code Overview
-
-Key types and functions:
-
-```go
-type ClaudeWrapper struct {
-    autoApprove         bool              // Current auto-approve state
-    ptmx                *os.File          // PTY master
-    buffer              string            // Output buffer for detection
-    countdownRunning    bool              // Countdown state
-    approvalCount       int               // Total approvals
-    // ... terminal state, channels, etc.
-}
-
-func isPrompt(text string) (bool, int)           // Detect permission prompts
-func needsYes(text string) bool                  // Check if "yes" text needed
-func (w *ClaudeWrapper) run(args []string) int   // Main entry point
-```
+- [`github.com/creack/pty`](https://github.com/creack/pty)
+- [`golang.org/x/term`](https://golang.org/x/term)
 
 ## Requirements
 
-- **Go**: 1.21 or later
-- **OS**: Unix-like system (Linux, macOS) - uses PTY
-- **Claude Code**: CLI must be in PATH
-- **Terminal**: ANSI escape code support
+- Go 1.21+
+- macOS or Linux
+- `claude` CLI in PATH
 
-## Known Limitations
+## Debug logging
 
-- Unix/macOS only (requires PTY support)
-- Assumes Claude Code binary is named `claude` and in PATH
-- Status bar always enabled
+```bash
+DEBUG_AUTOAPPROVE=1 claude-autoapprove
+tail -f ~/.claude-autoapprove-debug.log
+```
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) file for details.
-
-## Acknowledgments
-
-Built with Claude Code and developed collaboratively with Claude AI.
+MIT
