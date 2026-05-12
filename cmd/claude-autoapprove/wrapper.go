@@ -40,7 +40,13 @@ func (t *Terminal) UpdateSize() error {
 	}
 	t.Height = height
 	t.Width = width
-	return pty.Setsize(t.ptmx, &pty.Winsize{Rows: uint16(height), Cols: uint16(width)})
+	// PTY gets one row less than the real terminal so Claude's TUI never
+	// renders into the last row, which we reserve for the status bar.
+	ptyHeight := height - 1
+	if ptyHeight < 1 {
+		ptyHeight = 1
+	}
+	return pty.Setsize(t.ptmx, &pty.Winsize{Rows: uint16(ptyHeight), Cols: uint16(width)})
 }
 
 // ForceRedraw triggers a full UI redraw in the child process by briefly
@@ -48,21 +54,40 @@ func (t *Terminal) UpdateSize() error {
 // frameworks (e.g. Ink) skip redraws when dimensions are unchanged, so a
 // plain UpdateSize() after approval may do nothing. The toggle guarantees
 // an actual size change and therefore a complete repaint.
+//
+// The restore is delayed 50ms so the two SIGWINCHs arrive far enough apart
+// for the child to process the first one before the second lands. Without
+// the delay the kernel coalesces the signals and the child may read the
+// already-restored width, decide dimensions are unchanged, and skip the
+// redraw entirely.
 func (t *Terminal) ForceRedraw() {
-	if t.Width < 2 {
+	if t.Width < 2 || t.Height < 2 {
 		return
 	}
-	pty.Setsize(t.ptmx, &pty.Winsize{Rows: uint16(t.Height), Cols: uint16(t.Width - 1)})
-	pty.Setsize(t.ptmx, &pty.Winsize{Rows: uint16(t.Height), Cols: uint16(t.Width)})
+	// Toggle PTY width by one column to guarantee Ink sees a dimension change
+	// and does a full repaint. PTY height stays at Height-1 (our reserved row
+	// is never part of Claude's layout). Restore is async so the two SIGWINCHs
+	// are far enough apart to not be coalesced by the kernel.
+	ptyH := uint16(t.Height - 1)
+	pty.Setsize(t.ptmx, &pty.Winsize{Rows: ptyH, Cols: uint16(t.Width - 1)})
+	ptmx := t.ptmx
+	w := uint16(t.Width)
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		pty.Setsize(ptmx, &pty.Winsize{Rows: ptyH, Cols: w})
+	}()
 }
 
 func (t *Terminal) DrawStatus(message, color string) {
-	row := t.Height - 1
-	if row < 1 {
-		row = 1
+	if t.Height < 1 {
+		return
 	}
+	// Draw at the real terminal's last row. Claude's PTY is sized to Height-1
+	// rows so it never renders here — no conflict, no DECSC/DECRC needed for
+	// protection. We still save/restore the cursor so it stays where Claude's
+	// TUI left it (important when Claude is showing an input prompt).
 	fmt.Fprint(os.Stderr, "\0337")
-	fmt.Fprintf(os.Stderr, "\033[%d;1H\033[K\033[%sm%s\033[0m", row, color, message)
+	fmt.Fprintf(os.Stderr, "\033[%d;1H\033[K\033(B\033[%sm%s\033[0m", t.Height, color, message)
 	fmt.Fprint(os.Stderr, "\0338")
 }
 
@@ -94,9 +119,8 @@ type ClaudeWrapper struct {
 	statusMsgUntil time.Time
 
 	// Rescue / periodic redraw tracking
-	lastOutputTime  time.Time
-	lastRescueTime  time.Time
-	lastRedrawTime  time.Time
+	lastOutputTime time.Time
+	lastRescueTime time.Time
 }
 
 func New() *ClaudeWrapper {
@@ -426,10 +450,6 @@ func (w *ClaudeWrapper) Run(args []string) int {
 				w.executeApproval()
 			}
 			w.checkBuffer()
-			if !w.countdownActive && time.Since(w.lastRedrawTime) >= time.Second {
-				w.lastRedrawTime = time.Now()
-				w.term.ForceRedraw()
-			}
 			w.drawStatus()
 
 		case sig := <-sigChan:
