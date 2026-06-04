@@ -17,7 +17,7 @@ func initDebug() {
 	if err != nil {
 		return
 	}
-	path := filepath.Join(homeDir, ".claude-autoapprove-debug.log")
+	path := filepath.Join(homeDir, ".cry-aye-debug.log")
 	debugFile, err = os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
 		return

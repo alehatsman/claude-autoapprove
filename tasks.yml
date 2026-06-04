@@ -1,6 +1,6 @@
 version: '1'
 
-# Mooncake task runner for claude-autoapprove.
+# Mooncake task runner for cry-aye.
 # Run with: `mooncake task <name>`. Bare `mooncake task` lists all tasks.
 #
 # The quality gate (build/test/vet/lint/vuln/scan/ai-lint/arch-snapshot/
@@ -13,7 +13,7 @@ version: '1'
 
 vars:
   PKG: ./...
-  BIN: claude-autoapprove
+  BIN: cry-aye
 
 modules:
   goq:
@@ -60,21 +60,21 @@ tasks:
 
   # ── Build / install / clean ──────────────────────────────────────────────
   build:
-    desc: Build the claude-autoapprove binary
+    desc: Build the cry-aye binary
     steps:
       - shell: go mod download
       - use: goq/build
         props:
-          cmd_path: ./cmd/claude-autoapprove
+          cmd_path: ./cmd/cry-aye
           bin: '{{ BIN }}'
           trimpath: true
           ldflags: "-s -w"
 
   install:
-    desc: Build and install claude-autoapprove to /usr/local/bin
+    desc: Build and install cry-aye to /usr/local/bin
     steps:
       - shell: go mod download
-      - shell: go build -trimpath -ldflags "-s -w" -o {{ BIN }} ./cmd/claude-autoapprove
+      - shell: go build -trimpath -ldflags "-s -w" -o {{ BIN }} ./cmd/cry-aye
       - shell: |
           sudo cp {{ BIN }} /usr/local/bin/{{ BIN }}
           echo "✓ Installed /usr/local/bin/{{ BIN }}"

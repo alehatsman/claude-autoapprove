@@ -1,4 +1,4 @@
-module github.com/alehatsman/claude-autoapprove
+module github.com/alehatsman/cry-aye
 
 go 1.21
 

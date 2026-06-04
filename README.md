@@ -1,35 +1,35 @@
-# claude-autoapprove
+# cry-aye
 
 A lightweight PTY wrapper for Claude Code that automatically approves permission prompts.
 
 ## Install
 
 ```bash
-git clone https://github.com/yourusername/claude-autoapprove.git
-cd claude-autoapprove
+git clone https://github.com/yourusername/cry-aye.git
+cd cry-aye
 make install        # builds and copies to /usr/local/bin
 ```
 
 Or just build locally:
 
 ```bash
-make build          # produces ./claude-autoapprove
+make build          # produces ./cry-aye
 ```
 
 ## Usage
 
 ```bash
 # Drop-in replacement for the claude command
-claude-autoapprove
+cry-aye
 
 # Pass a prompt directly
-claude-autoapprove -- 'refactor this module'
+cry-aye -- 'refactor this module'
 
 # Add a 3-second countdown before each approval (default is 0)
-claude-autoapprove --delay 3
+cry-aye --delay 3
 
 # Pass flags to Claude itself (use -- separator)
-claude-autoapprove -- --help
+cry-aye -- --help
 ```
 
 ## Options
@@ -88,8 +88,8 @@ Scores the last 50 stripped lines of the buffer:
 ## Debug logging
 
 ```bash
-DEBUG_AUTOAPPROVE=1 claude-autoapprove
-tail -f ~/.claude-autoapprove-debug.log
+DEBUG_AUTOAPPROVE=1 cry-aye
+tail -f ~/.cry-aye-debug.log
 ```
 
 ## License

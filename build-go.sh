@@ -1,22 +1,22 @@
 #!/bin/bash
-# Build script for claude-autoapprove
+# Build script for cry-aye
 
 set -e
 
-echo "Building claude-autoapprove..."
+echo "Building cry-aye..."
 
 # Download dependencies
 go mod download
 
 # Build
-go build -o claude-autoapprove main.go
+go build -o cry-aye main.go
 
-echo "✓ Built successfully: ./claude-autoapprove"
+echo "✓ Built successfully: ./cry-aye"
 echo ""
 echo "Usage:"
-echo "  ./claude-autoapprove [claude args...]"
+echo "  ./cry-aye [claude args...]"
 echo ""
 echo "Examples:"
-echo "  ./claude-autoapprove"
-echo "  ./claude-autoapprove --help"
-echo "  ./claude-autoapprove 'review this code'"
+echo "  ./cry-aye"
+echo "  ./cry-aye --help"
+echo "  ./cry-aye 'review this code'"
