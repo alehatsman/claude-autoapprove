@@ -1,4 +1,4 @@
-# claude-autoapprove CI — runs the pre-push quality gate on every push.
+# cry-aye CI — runs the pre-push quality gate on every push.
 #
 # Uses moongit-ci-dev:latest (Go + mooncake + static-analysis tools).
 # MOONCAKE_MODULE_INSECURE trusts the local moongit server for the go-quality
