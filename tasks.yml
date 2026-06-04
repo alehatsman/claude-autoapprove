@@ -1,0 +1,131 @@
+version: '1'
+
+# Mooncake task runner for claude-autoapprove.
+# Run with: `mooncake task <name>`. Bare `mooncake task` lists all tasks.
+#
+# The quality gate (build/test/vet/lint/vuln/scan/ai-lint/arch-snapshot/
+# budget-status/dupl/ci-fast/ci) is provided by the shared go-quality module
+# (alehatsman/go-quality), keeping it in lockstep with mooncake + moongit.
+#
+# PREREQ: go-quality is hosted on the local moongit over plain http, so the
+# module fetch needs the host trusted once per shell:
+#   export MOONCAKE_MODULE_INSECURE=host.docker.internal:8080
+
+vars:
+  PKG: ./...
+  BIN: claude-autoapprove
+
+modules:
+  goq:
+    source: "host.docker.internal:8080/alehatsman/go-quality@v0.1.1"
+    props:
+      pkg: "{{ PKG }}"
+
+tasks:
+
+  # ── Tool installation ────────────────────────────────────────────────────
+  install-tools:
+    desc: Install every static-analysis tool the project depends on
+    steps:
+      - log: "→ Installing golangci-lint..."
+      - shell: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
+      - log: "→ Installing govulncheck..."
+      - shell: go install golang.org/x/vuln/cmd/govulncheck@latest
+      - log: "→ Installing gocyclo..."
+      - shell: go install github.com/fzipp/gocyclo/cmd/gocyclo@latest
+      - log: "→ Installing goda..."
+      - shell: go install github.com/loov/goda@latest
+      - log: "→ Installing dupl..."
+      - shell: go install github.com/mibk/dupl@latest
+      - log: "✓ Tools installed. Verify with 'mooncake task check-tools'."
+
+  check-tools:
+    desc: Report which static-analysis tools are installed
+    steps:
+      - shell: |
+          missing=0
+          for tool in golangci-lint govulncheck gocyclo goda dupl; do
+            if command -v "$tool" >/dev/null 2>&1 || [ -x "$(go env GOPATH)/bin/$tool" ]; then
+              printf "  ✓ %s\n" "$tool"
+            else
+              printf "  ✗ %s — MISSING\n" "$tool"
+              missing=$((missing + 1))
+            fi
+          done
+          if [ "$missing" -gt 0 ]; then
+            echo ""
+            echo "$missing tool(s) missing. Run: mooncake task install-tools"
+            exit 1
+          fi
+
+  # ── Build / install / clean ──────────────────────────────────────────────
+  build:
+    desc: Build the claude-autoapprove binary
+    steps:
+      - shell: go mod download
+      - use: goq/build
+        props:
+          cmd_path: ./cmd/claude-autoapprove
+          bin: '{{ BIN }}'
+          trimpath: true
+          ldflags: "-s -w"
+
+  install:
+    desc: Build and install claude-autoapprove to /usr/local/bin
+    steps:
+      - shell: go mod download
+      - shell: go build -trimpath -ldflags "-s -w" -o {{ BIN }} ./cmd/claude-autoapprove
+      - shell: |
+          sudo cp {{ BIN }} /usr/local/bin/{{ BIN }}
+          echo "✓ Installed /usr/local/bin/{{ BIN }}"
+
+  clean:
+    desc: Remove the built binary
+    steps:
+      - shell: rm -f {{ BIN }}
+      - log: "✓ Cleaned"
+
+  # ── Test / format / vet ──────────────────────────────────────────────────
+  test: goq/test
+
+  fmt:
+    desc: Format all Go files with gofmt
+    steps:
+      - shell: gofmt -w .
+
+  vet: goq/vet
+
+  # ── Lint + security + vulnerability scans ───────────────────────────────
+  lint: goq/lint
+
+  vuln: goq/vuln
+
+  scan: goq/scan
+
+  # ── Architecture / analysis reports ─────────────────────────────────────
+  arch-snapshot: goq/arch-snapshot
+
+  budget-status: goq/budget-status
+
+  dupl: goq/dupl
+
+  # ── Setup ────────────────────────────────────────────────────────────────
+  setup-hooks:
+    desc: Install pre-commit and pre-push git hooks
+    steps:
+      - shell: bash ./scripts/setup-hooks.sh
+
+  # ── AI-smell sweep ───────────────────────────────────────────────────────
+  ai-lint: goq/ai-lint
+
+  ai-lint-all:
+    desc: AI-smell sweep on every tracked Go file
+    steps:
+      - use: goq/ai-lint
+        props:
+          args: "--all"
+
+  # ── Gates ────────────────────────────────────────────────────────────────
+  ci-fast: goq/ci-fast
+
+  ci: goq/ci

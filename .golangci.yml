@@ -1,0 +1,92 @@
+version: "2"
+
+run:
+  timeout: 5m
+  tests: false
+
+linters:
+  enable:
+    - gosec
+    - errcheck
+    - staticcheck
+    - govet
+    - ineffassign
+    - unused
+    - misspell
+    - unconvert
+    - bodyclose
+    - revive
+    - cyclop
+  disable:
+    - errname
+    - exhaustive
+    - wrapcheck
+    - goconst
+    - gocyclo
+    - gocritic
+    - unparam
+    - dupl
+    - prealloc
+
+  settings:
+    gosec:
+      severity: "medium"
+      confidence: "medium"
+      excludes:
+        - G104  # errors unhandled
+        - G115  # integer overflow conversion
+        - G204  # subprocess launched with variable
+        - G301  # bad dir perms
+        - G302  # file perms
+        - G304  # path from variable
+        - G306  # bad write perms
+
+    cyclop:
+      max-complexity: 35
+
+    errcheck:
+      check-type-assertions: true
+      check-blank: false
+
+    revive:
+      enable-all-rules: false
+      rules:
+        - name: blank-imports
+        - name: context-as-argument
+        - name: context-keys-type
+        - name: dot-imports
+        - name: error-return
+        - name: error-strings
+        - name: error-naming
+        - name: if-return
+        - name: increment-decrement
+        - name: var-naming
+        - name: var-declaration
+        - name: package-comments
+        - name: range
+        - name: receiver-naming
+        - name: time-naming
+        - name: unexported-return
+        - name: indent-error-flow
+        - name: errorf
+        - name: empty-block
+        - name: superfluous-else
+        - name: unused-parameter
+        - name: unreachable-code
+
+    staticcheck:
+      checks: ["all", "-QF*", "-ST1005", "-ST1020", "-S1008", "-S1017", "-S1034"]
+
+  exclusions:
+    rules:
+      - linters: [errcheck]
+        text: "Error return value of `resp\\.Body\\.Close` is not checked"
+
+      # fmt.Fprintf/Fprintln/Fprint to stdout/stderr in cmd/ — idiomatic CLI.
+      - path: cmd/
+        linters: [errcheck]
+        text: "Error return value of `fmt\\.F"
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

@@ -1,0 +1,17 @@
+# claude-autoapprove CI — runs the pre-push quality gate on every push.
+#
+# Uses moongit-ci-dev:latest (Go + mooncake + static-analysis tools).
+# MOONCAKE_MODULE_INSECURE trusts the local moongit server for the go-quality
+# module fetch (host.docker.internal resolves from both host and container).
+version: "1"
+on:
+  push:
+    branches: [master, "feat/*"]
+jobs:
+  quality:
+    image: moongit-ci-dev:latest
+    steps:
+      - shell:
+          cmd: mooncake task ci
+        env:
+          MOONCAKE_MODULE_INSECURE: host.docker.internal:8080
